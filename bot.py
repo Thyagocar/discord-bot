@@ -12,11 +12,10 @@ CANAL_RANKING_ID = 1535446377226702909
 
 # Configurações de Futebol e Bot
 FOOTBALL_DATA_KEY = "ee82d989ea224f0499aef3706caa09d2"
-# O token é obtido de forma segura pela variável de ambiente da Render
 TOKEN_DO_BOT = os.getenv("DISCORD_TOKEN")
 
 HEADERS = {"X-Auth-Token": FOOTBALL_DATA_KEY}
-CRUZEIRO_ID = 1783 
+CRUZEIRO_ID = 1783  # ID oficial do Cruzeiro na API
 
 # Arquivos locais
 PALPITES_FILE = "palpites.json"
@@ -25,8 +24,8 @@ RANKING_FILE = "ranking.json"
 
 # Configuração de Intents
 intents = discord.Intents.default()
-intents.members = True          # Permite gerenciar/identificar novos membros
-intents.message_content = True  # Permite ler conteúdos de mensagens se necessário
+intents.members = True          
+intents.message_content = True  
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
@@ -43,6 +42,7 @@ def salvar_dados(arquivo, dados):
         json.dump(dados, f, indent=4, ensure_ascii=False)
 
 def obter_proximo_jogo():
+    # URL corrigida para buscar estritamente as partidas agendadas do Cruzeiro em qualquer competição
     url = f"https://api.football-data.org/v4/teams/{CRUZEIRO_ID}/matches?status=SCHEDULED"
     try:
         res = requests.get(url, headers=HEADERS)

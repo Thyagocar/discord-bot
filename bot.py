@@ -86,10 +86,11 @@ class PainelConfigView(ui.View):
                         "⚙️ **`/configcargo`** — Define o cargo com permissão de adm.\n"
                         "💬 **`/configcanal`** — Define o canal onde a torcida envia palpites.\n"
                         "🏆 **`/configranking`** — Define o canal onde o ranking será postado.\n"
+                        "👑 **`/configdestaque`** — Define o cargo automático para o 1º lugar.\n"
                         "🔔 **`/config-notificacao`** — Define canal e cargo de avisos automáticos.\n"
                         "📌 **`/setarjogo`** — Define o próximo confronto e avisa a torcida.\n"
                         "🔒 **`/fecharpalpites`** — Encerra as apostas do jogo atual e avisa no canal.\n"
-                        "🏁 **`/placarfinal`** — Insere o placar, marcadores e gera o ranking.",
+                        "🏁 **`/placarfinal`** — Insere o placar, marcadores, atualiza o líder e gera o ranking.",
             color=0x0033A0
         )
         await interaction.response.send_message(embed=embed, ephemeral=True)
@@ -115,6 +116,7 @@ async def on_guild_join(guild):
                     "• `/configcargo`\n"
                     "• `/configcanal`\n"
                     "• `/configranking`\n"
+                    "• `/configdestaque`\n"
                     "• `/config-notificacao`",
         color=0x0033A0
     )
@@ -258,6 +260,21 @@ async def configranking_cmd(interaction: discord.Interaction, canal_id: str):
     config["canal_ranking"] = canal_id
     salvar_dados(CONFIG_FILE, config)
     await interaction.response.send_message(f"✅ Canal de ranking configurado para: <#{canal_id}>", ephemeral=True)
+
+
+@bot.tree.command(name="configdestaque", description="[Admin] Define o cargo automático que o 1º lugar do ranking vai receber.")
+@app_commands.describe(cargo_id="Selecione ou digite o nome do cargo para o líder")
+@app_commands.autocomplete(cargo_id=autocomplete_cargos)
+async def configdestaque_cmd(interaction: discord.Interaction, cargo_id: str):
+    if not verificar_permissao_adm(interaction):
+        return await interaction.response.send_message("❌ Sem permissão.", ephemeral=True)
+
+    config = carregar_dados(CONFIG_FILE)
+    config["cargo_destaque"] = cargo_id
+    salvar_dados(CONFIG_FILE, config)
+
+    role = interaction.guild.get_role(int(cargo_id))
+    await interaction.response.send_message(f"✅ Cargo de Destaque do Líder configurado para: **{role.name if role else cargo_id}**", ephemeral=True)
 
 
 @bot.tree.command(name="config-notificacao", description="[Admin] Define canal e cargo para avisos de novos jogos.")
@@ -472,7 +489,35 @@ async def placarfinal_cmd(interaction: discord.Interaction, gols_mandante: int, 
 
     salvar_dados(RANKING_FILE, ranking)
 
+    # Ordena o ranking para saber quem é o 1º lugar atual
     ranking_ordenado = sorted(ranking.items(), key=lambda x: x[1]["pontos"], reverse=True)
+    
+    # ================= GERENCIAMENTO DE CARGO DE DESTAQUE (LÍDER) =================
+    config = carregar_dados(CONFIG_FILE)
+    cargo_destaque_id = config.get("cargo_destaque")
+    
+    if cargo_destaque_id:
+        role_destaque = interaction.guild.get_role(int(cargo_destaque_id))
+        if role_destaque:
+            novo_lider_uid = ranking_ordenado[0][0]
+            
+            # Remove o cargo de todo mundo que não é o novo líder (incluindo o antigo líder)
+            for member in role_destaque.members:
+                if str(member.id) != novo_lider_uid:
+                    try:
+                        await member.remove_roles(role_destaque)
+                    except:
+                        pass
+            
+            # Adiciona o cargo ao novo líder
+            try:
+                membro_lider = interaction.guild.get_member(int(novo_lider_uid))
+                if membro_lider and role_destaque not in membro_lider.roles:
+                    await membro_lider.add_roles(role_destaque)
+            except:
+                pass
+    # ============================================================================
+
     texto_ranking = ""
     for idx, (uid, info) in enumerate(ranking_ordenado, start=1):
         texto_ranking += f"**{idx}º** — {info['nome']} (`{info['pontos']} pts`)\n"
@@ -485,14 +530,12 @@ async def placarfinal_cmd(interaction: discord.Interaction, gols_mandante: int, 
         color=0x0033A0
     )
 
-    config = carregar_dados(CONFIG_FILE)
     canal_ranking_id = config.get("canal_ranking")
-    
     if canal_ranking_id:
         canal_rank = interaction.guild.get_channel(int(canal_ranking_id))
         if canal_rank:
             await canal_rank.send(embed=embed)
-            await interaction.response.send_message(f"✅ Placar apurado e enviado para {canal_rank.mention}.", ephemeral=True)
+            await interaction.response.send_message(f"✅ Placar apurado, cargo de destaque atualizado e ranking enviado para {canal_rank.mention}.", ephemeral=True)
         else:
             await interaction.response.send_message(embed=embed)
     else:
@@ -519,6 +562,6 @@ async def ranking_cmd(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed)
 
 
-# Inicializa o web server para o Render e executa el bot
+# Inicializa o web server para o Render e executa o bot
 threading.Thread(target=run_web).start()
 bot.run(TOKEN_DO_BOT)

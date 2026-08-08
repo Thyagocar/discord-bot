@@ -86,7 +86,6 @@ class ConfigModal(ui.Modal, title="⚙️ Configuração Geral do Bot"):
 
         guild = interaction.guild
         
-        # Valida Cargo
         cargo_input = self.cargos_adm.value.strip()
         cargo_id = None
         for role in guild.roles:
@@ -94,7 +93,6 @@ class ConfigModal(ui.Modal, title="⚙️ Configuração Geral do Bot"):
                 cargo_id = str(role.id)
                 break
 
-        # Valida Canal de Comandos
         cmd_input = self.canal_comandos.value.strip().replace("#", "")
         canal_cmd_id = None
         for channel in guild.text_channels:
@@ -102,7 +100,6 @@ class ConfigModal(ui.Modal, title="⚙️ Configuração Geral do Bot"):
                 canal_cmd_id = str(channel.id)
                 break
 
-        # Valida Canal de Ranking
         rank_input = self.canal_ranking.value.strip().replace("#", "")
         canal_rank_id = None
         for channel in guild.text_channels:
@@ -142,8 +139,8 @@ class PainelConfigView(ui.View):
             title="🛠️ Painel de Ajuda - Administradores",
             description="Aqui estão os comandos exclusivos para gerenciar o Bolão:\n\n"
                         "📌 **`/setarjogo`** — Define o próximo confronto, horário e estádio.\n"
-                        "🏁 **`/placarfinal`** — Insere o resultado final, calcula os pontos automaticamente e gera o ranking.\n\n"
-                        "💡 *Dica:* Clique no botão verde **Configurar Servidor** para definir canais e cargos sem limitações!",
+                        "🏁 **`/placarfinal`** — Insere o resultado, artilheiros reais, calcula pontos e gera o ranking.\n\n"
+                        "💡 *Dica:* Clique no botão verde **Configurar Servidor** para definir canais e cargos!",
             color=0x0033A0
         )
         await interaction.response.send_message(embed=embed, ephemeral=True)
@@ -172,7 +169,7 @@ async def on_guild_join(guild):
     await canal.send(embed=embed, view=PainelConfigView())
 
 
-# ================= MODAL DE PALPITE =================
+# ================= MODAL DE PALPITE (COM GOLS E ARTILHEIROS) =================
 
 class PalpiteModal(ui.Modal):
     def __init__(self, jogo):
@@ -191,14 +188,22 @@ class PalpiteModal(ui.Modal):
         )
         self.gols_visitante = ui.TextInput(
             label=f"Gols do {visitante}",
-            placeholder="Ex: 0",
+            placeholder="Ex: 1",
             min_length=1,
             max_length=2,
             required=True
         )
+        self.artilheiros = ui.TextInput(
+            label="Quem fará os gols? (Opcional)",
+            placeholder="Ex: Kaio Jorge, Dinenno",
+            style=discord.TextStyle.paragraph,
+            required=False,
+            max_length=200
+        )
 
         self.add_item(self.gols_mandante)
         self.add_item(self.gols_visitante)
+        self.add_item(self.artilheiros)
 
     async def on_submit(self, interaction: discord.Interaction):
         if not (self.gols_mandante.value.isdigit() and self.gols_visitante.value.isdigit()):
@@ -207,6 +212,7 @@ class PalpiteModal(ui.Modal):
 
         g_mandante = int(self.gols_mandante.value)
         g_visitante = int(self.gols_visitante.value)
+        autores = self.artilheiros.value.strip() or "Nenhum citado"
 
         user_id = str(interaction.user.id)
         user_name = interaction.user.display_name
@@ -216,7 +222,9 @@ class PalpiteModal(ui.Modal):
         if user_id in palpites:
             p_antigo = palpites[user_id]
             await interaction.response.send_message(
-                f"❌ Você já enviou seu palpite para este jogo e ele está trancado!\nSeu palpite salvo: **{self.jogo['mandante']} {p_antigo['g_mand']} x {p_antigo['g_vis']} {self.jogo['visitante']}**", 
+                f"❌ Você já enviou seu palpite para este jogo e ele está trancado!\n"
+                f"Seu palpite salvo: **{self.jogo['mandante']} {p_antigo['g_mand']} x {p_antigo['g_vis']} {self.jogo['visitante']}**\n"
+                f"⚽ Artilheiros: *{p_antigo['artilheiros']}*", 
                 ephemeral=True
             )
             return
@@ -224,13 +232,15 @@ class PalpiteModal(ui.Modal):
         palpites[user_id] = {
             "nome": user_name,
             "g_mand": g_mandante,
-            "g_vis": g_visitante
+            "g_vis": g_visitante,
+            "artilheiros": autores
         }
         salvar_dados(PALPITES_FILE, palpites)
 
         embed = discord.Embed(
             title="🎯 Palpite Registrado com Sucesso!",
-            description=f"Partida: **{self.jogo['mandante']} {g_mandante} x {g_visitante} {self.jogo['visitante']}**\n\n"
+            description=f"Partida: **{self.jogo['mandante']} {g_mandante} x {g_visitante} {self.jogo['visitante']}**\n"
+                        f"⚽ Artilheiros Palpitados: *{autores}*\n\n"
                         f"🔒 Salvo com sucesso! Você só poderá enviar novo palpite após o adm setar outra partida.",
             color=0x0033A0
         )
@@ -300,7 +310,7 @@ async def proximojogo_cmd(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed)
 
 
-@bot.tree.command(name="palpite", description="Abre o painel para registrar seu palpite único.")
+@bot.tree.command(name="palpite", description="Abre o painel para registrar seu palpite de placar e artilheiros.")
 async def palpite_cmd(interaction: discord.Interaction):
     config = carregar_dados(CONFIG_FILE)
     canal_permitido = config.get("canal_comandos")
@@ -317,9 +327,13 @@ async def palpite_cmd(interaction: discord.Interaction):
     await interaction.response.send_modal(PalpiteModal(jogo))
 
 
-@bot.tree.command(name="placarfinal", description="[Admin] Insere o placar final, calcula pontos e atualiza o ranking.")
-@app_commands.describe(gols_mandante="Gols marcados pelo mandante", gols_visitante="Gols marcados pelo visitante")
-async def placarfinal_cmd(interaction: discord.Interaction, gols_mandante: int, gols_visitante: int):
+@bot.tree.command(name="placarfinal", description="[Admin] Insere o placar final, artilheiros, calcula pontos e gera o ranking.")
+@app_commands.describe(
+    gols_mandante="Gols do mandante", 
+    gols_visitante="Gols do visitante",
+    artilheiros_reais="Quem fez os gols na partida real (Ex: Kaio Jorge)"
+)
+async def placarfinal_cmd(interaction: discord.Interaction, gols_mandante: int, gols_visitante: int, artilheiros_reais: str):
     if not verificar_permissao_adm(interaction):
         await interaction.response.send_message("❌ Você não tem permissão para usar este comando administrativo.", ephemeral=True)
         return
@@ -342,17 +356,24 @@ async def placarfinal_cmd(interaction: discord.Interaction, gols_mandante: int, 
         g_m = dados["g_mand"]
         g_v = dados["g_vis"]
         nome = dados["nome"]
+        art_palpite = dados["artilheiros"].lower()
         
         vencedor_palpite = "mandante" if g_m > g_v else ("visitante" if g_v > g_m else "empate")
         pontos_ganhos = 0
         status_texto = "❌ Errou"
         
+        # Pontuação: 3 pontos para placar exato, 1 ponto para vencedor correto
         if g_m == gols_mandante and g_v == gols_visitante:
             pontos_ganhos = 3
             status_texto = "🎯 Placar Exato! (+3 pts)"
         elif vencedor_palpite == vencedor_real:
             pontos_ganhos = 1
-            status_texto = "✅ Acertou o Vencedor! (+1 pt)"
+            status_texto = "✅ Acertou Vencedor! (+1 pt)"
+
+        # Bônus extra opcional se acertar parte dos artilheiros citados
+        if any(art.strip() in art_palpite for art in artilheiros_reais.lower().split(',')) and art_palpite != "nenhum citado":
+            pontos_ganhos += 1
+            status_texto += " + ⚽ Artilheiro (+1 pt)"
 
         if uid not in ranking:
             ranking[uid] = {"nome": nome, "pontos": 0}
@@ -369,7 +390,9 @@ async def placarfinal_cmd(interaction: discord.Interaction, gols_mandante: int, 
 
     embed = discord.Embed(
         title=f"🏁 Resultado Final: {jogo['mandante']} {gols_mandante} x {gols_visitante} {jogo['visitante']}",
-        description=f"**Apuração dos Palpites:**\n{resultados_parciais}\n\n🏆 **Ranking Geral Atualizado:**\n{texto_ranking}",
+        description=f"⚽ **Artilheiros Oficiais:** {artilheiros_reais}\n\n"
+                    f"**Apuração dos Palpites:**\n{resultados_parciais}\n\n"
+                    f"🏆 **Ranking Geral Atualizado:**\n{texto_ranking}",
         color=0x0033A0
     )
 

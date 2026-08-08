@@ -5,7 +5,7 @@ import requests
 import datetime
 import discord
 from discord import app_commands, ui
-from discord.ext import commands, tasks
+from discord.ext import commands
 from flask import Flask
 
 # ================= MINI SERVIDOR WEB PARA O RENDER =================
@@ -20,26 +20,12 @@ def run_web():
     app.run(host="0.0.0.0", port=port)
 # ===================================================================
 
-# ================= CONFIGURAÇÕES DO SERVIDOR =================
-ID_SERVIDOR_PRINCIPAL = 1528068312045584434 
-LINK_CONVITE = "https://discord.gg/QsAayXg4UA"
-CANAL_RANKING_ID = 1535446377226702909 
-
-RAPIDAPI_KEY = "a0a5d5463msh72f631258e37bp7185f43jsnba1bbd157d2b"
 TOKEN_DO_BOT = os.getenv("DISCORD_TOKEN")
 
-HEADERS = {
-    "X-RapidAPI-Key": RAPIDAPI_KEY,
-    "X-RapidAPI-Host": "sofascore.p.rapidapi.com"
-}
-
-CRUZEIRO_ID_SOFASCORE = 1960
-
+CONFIG_FILE = "config.json"
 PALPITES_FILE = "palpites.json"
 RANKING_FILE = "ranking.json"
-
-JOGO_CACHE = None
-# =============================================================
+JOGO_ATIVO_FILE = "jogo_ativo.json"
 
 intents = discord.Intents.default()
 intents.members = True          
@@ -51,79 +37,81 @@ def carregar_dados(arquivo):
     if os.path.exists(arquivo):
         with open(arquivo, "r", encoding="utf-8") as f:
             return json.load(f)
-    return {}
+    return {} if "ranking" in arquivo or "config" in arquivo else ([] if "palpites" in arquivo else None)
 
 def salvar_dados(arquivo, dados):
     with open(arquivo, "w", encoding="utf-8") as f:
         json.dump(dados, f, indent=4, ensure_ascii=False)
 
-def buscar_jogo_na_api():
-    url = "https://sofascore.p.rapidapi.com/teams/get-events" 
-    querystring = {"teamId": str(CRUZEIRO_ID_SOFASCORE), "page": "0"}
-    try:
-        res = requests.get(url, headers=HEADERS, params=querystring, timeout=10)
-        if res.status_code == 200:
-            data = res.json()
-            events = data.get("events", [])
-            
-            # Filtra apenas jogos futuros com base no timestamp atual
-            agora = datetime.datetime.now().timestamp()
-            eventos_futuros = [e for e in events if e.get("startTimestamp", 0) > agora]
-            
-            # Ordena pelo jogo mais próximo cronologicamente
-            eventos_futuros.sort(key=lambda x: x.get("startTimestamp", 0))
-            
-            if eventos_futuros:
-                evento = eventos_futuros[0]
-                
-                timestamp = evento.get("startTimestamp")
-                data_str = "Data a confirmar"
-                if timestamp:
-                    dt = datetime.datetime.fromtimestamp(timestamp)
-                    dias_semana = ["Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado", "Domingo"]
-                    dia_sem = dias_semana[dt.weekday()]
-                    data_str = f"{dia_sem} - {dt.strftime('%H:%M')}"
 
-                estadio = evento.get("stadium", {}).get("name", "Estádio a definir")
+# ================= PAINEL DE CONFIGURAÇÃO (AO ENTRAR NO SERVIDOR) =================
 
-                return {
-                    "id": evento["id"],
-                    "homeTeam": {"name": evento["homeTeam"]["name"]},
-                    "awayTeam": {"name": evento["awayTeam"]["name"]},
-                    "data_str": data_str,
-                    "estadio": estadio
-                }
-    except Exception as e:
-        print(f"Erro ao buscar jogo na Sofascore: {e}")
-    return None
+class PainelConfigView(ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
 
-@tasks.loop(minutes=30)
-async def atualizar_cache_jogo():
-    global JOGO_CACHE
-    novo_jogo = buscar_jogo_na_api()
-    if novo_jogo:
-        JOGO_CACHE = novo_jogo
-        print("🔄 Cache do próximo jogo atualizado.")
+    @ui.button(label="📋 Ver Comandos Admin", style=discord.ButtonStyle.primary, custom_id="btn_ajuda_admin")
+    async def ajuda_admin(self, interaction: discord.Interaction, button: discord.ui.Button):
+        embed = discord.Embed(
+            title="🛠️ Painel de Ajuda - Administradores",
+            description="Aqui estão os comandos exclusivos para gerenciar o Bolão:\n\n"
+                        "📌 **`/setarjogo`** — Define o próximo confronto, horário e estádio.\n"
+                        "🏁 **`/placarfinal`** — Insere o resultado final, calcula os pontos automaticamente e gera o ranking.\n\n"
+                        "💡 *Dica:* O sistema impede que o usuário envie mais de um palpite por partida ativa!",
+            color=0x0033A0
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
+
+@bot.event
+async def on_guild_join(guild):
+    # Cria canal privado para configuração
+    overwrites = {
+        guild.default_role: discord.PermissionOverwrite(read_messages=False),
+        guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True, manage_channels=True)
+    }
+    
+    # Adiciona permissão para administradores verem o canal
+    for role in guild.roles:
+        if role.permissions.administrator:
+            overwrites[role] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
+
+    canal = await guild.create_text_channel("⚙️│config-bot", overwrites=overwrites)
+    
+    embed = discord.Embed(
+        title="🤖 Bem-vindo ao Bot Oficial do Cruzeiro!",
+        description="Este canal é **privado** e visível apenas para administradores.\n\n"
+                    "**Para que serve o bot?**\n"
+                    "Gerencia o bolão oficial da torcida com painéis interativos, registro de palpites únicos por partida, cálculo automático de pontos e ranking geral.\n\n"
+                    "⚙️ **Como configurar:**\n"
+                    "1. Use `/setarjogo` para cadastrar o próximo duelo.\n"
+                    "2. Divulgue no chat da torcida para usarem `/proximojogo` e `/palpite`.\n"
+                    "3. Após o apito final, use `/placarfinal` para atualizar o ranking!",
+        color=0x0033A0
+    )
+    await canal.send(embed=embed, view=PainelConfigView())
+
+
+# ================= MODAL DE PALPITE =================
 
 class PalpiteModal(ui.Modal):
     def __init__(self, jogo):
-        mandante = jogo["homeTeam"]["name"]
-        visitante = jogo["awayTeam"]["name"]
+        mandante = jogo["mandante"]
+        visitante = jogo["visitante"]
         
         super().__init__(title=f"Palpite: {mandante} x {visitante}")
         self.jogo = jogo
 
         self.gols_mandante = ui.TextInput(
-            label=f"Gols: {mandante}",
-            placeholder="Digite um número ex: 2",
+            label=f"Gols do {mandante}",
+            placeholder="Ex: 2",
             min_length=1,
             max_length=2,
             required=True
         )
         self.gols_visitante = ui.TextInput(
-            label=f"Gols: {visitante}",
-            placeholder="Digite um número ex: 0",
+            label=f"Gols do {visitante}",
+            placeholder="Ex: 0",
             min_length=1,
             max_length=2,
             required=True
@@ -140,97 +128,110 @@ class PalpiteModal(ui.Modal):
         g_mandante = int(self.gols_mandante.value)
         g_visitante = int(self.gols_visitante.value)
 
-        jogo_id = str(self.jogo["id"])
         user_id = str(interaction.user.id)
         user_name = interaction.user.display_name
 
-        mandante_nome = self.jogo["homeTeam"]["name"]
-        visitante_nome = self.jogo["awayTeam"]["name"]
-
-        if "Cruzeiro" in mandante_nome:
-            g_cruzeiro, g_adv = g_mandante, g_visitante
-        else:
-            g_cruzeiro, g_adv = g_visitante, g_mandante
-
         palpites = carregar_dados(PALPITES_FILE)
-        if jogo_id not in palpites:
-            palpites[jogo_id] = {"processado": False, "palpites_usuarios": {}}
+        
+        # Garante que o usuário só envie 1 vez para o jogo atual
+        if user_id in palpites:
+            p_antigo = palpites[user_id]
+            await interaction.response.send_message(
+                f"❌ Você já registrou um palpite para este jogo!\nSeu palpite salvo foi: **{p_antigo['g_mand']}\n x {p_antigo['g_vis']}**", 
+                ephemeral=True
+            )
+            return
 
-        palpites[jogo_id]["palpites_usuarios"][user_id] = {
+        palpites[user_id] = {
             "nome": user_name,
-            "cruzeiro": g_cruzeiro,
-            "adversario": g_adv
+            "g_mand": g_mandante,
+            "g_vis": g_visitante
         }
         salvar_dados(PALPITES_FILE, palpites)
 
         embed = discord.Embed(
-            title="🎯 Palpite Registrado!",
-            description=f"Seu palpite para **{mandante_nome} x {visitante_nome}** foi registrado com sucesso:\n\n"
-                        f"⚽ **{mandante_nome} {g_mandante} x {g_visitante} {visitante_nome}**",
+            title="🎯 Palpite Registrado com Sucesso!",
+            description=f"Partida: **{self.jogo['mandante']} {g_mandante} x {g_visitante} {self.jogo['visitante']}**\n\n"
+                        f"🔒 Seu palpite está trancado. Boa sorte!",
             color=0x0033A0
         )
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
+# ================= EVENTO ON_READY =================
+
 @bot.event
 async def on_ready():
     try:
         synced = await bot.tree.sync()
-        print(f"🤖 Bot conectado com sucesso como: {bot.user.name}")
+        print(f"🤖 Bot conectado como: {bot.user.name}")
         print(f"⚙️ Comandos sincronizados: {len(synced)}")
-        
-        global JOGO_CACHE
-        JOGO_CACHE = buscar_jogo_na_api()
-
-        if not checar_jogos.is_running():
-            checar_jogos.start()
-        if not atualizar_cache_jogo.is_running():
-            atualizar_cache_jogo.start()
     except Exception as e:
-        print(f"Erro ao inicializar o bot: {e}")
+        print(f"Erro ao sincronizar comandos: {e}")
 
 
 # ================= COMANDOS DO BOT =================
 
-@bot.tree.command(name="proximojogo", description="Mostra os detalhes do próximo jogo do Cruzeiro.")
-async def proximojogo_cmd(interaction: discord.Interaction):
-    global JOGO_CACHE
-    if not JOGO_CACHE:
-        JOGO_CACHE = buscar_jogo_na_api()
-
-    if not JOGO_CACHE:
-        await interaction.response.send_message("❌ Não encontrei nenhum jogo agendado do Cruzeiro no momento.", ephemeral=True)
-        return
-
-    mandante = JOGO_CACHE["homeTeam"]["name"]
-    visitante = JOGO_CACHE["awayTeam"]["name"]
-    data = JOGO_CACHE.get("data_str", "Data a confirmar")
-    estadio = JOGO_CACHE.get("estadio", "Estádio a definir")
+@bot.tree.command(name="setarjogo", description="[Admin] Define manualmente o próximo jogo.")
+@app_commands.checks.has_permissions(administrator=True)
+async def setarjogo_cmd(interaction: discord.Interaction, mandante: str, visitante: str, horario: str, estadio: str):
+    jogo = {
+        "mandante": mandante,
+        "visitante": visitante,
+        "horario": horario,
+        "estadio": estadio
+    }
+    salvar_dados(JOGO_ATIVO_FILE, jogo)
+    
+    # Reseta os palpites da partida anterior ao criar um novo jogo
+    salvar_dados(PALPITES_FILE, {})
 
     embed = discord.Embed(
-        title="🦊 Próximo Jogo do Cruzeiro",
-        description=f"⚽ **{mandante} x {visitante}**\n📅 **{data}**\n🏟️ **{estadio}**\n\nPalpites abertos!\nUse `/palpite` para registrar o seu placar.",
+        title="⚽ Novo Jogo Configurado!",
+        description=f"**{mandante} x {visitante}**\n📅 **Horário:** {horario}\n🏟️ **Estádio:** {estadio}\n\n*Os palpites anteriores foram limpos. O bolão está aberto!*",
         color=0x0033A0
     )
     await interaction.response.send_message(embed=embed)
 
 
-@bot.tree.command(name="previsao", description="Análise de IA baseada no próximo adversário do Cruzeiro.")
-async def previsao_cmd(interaction: discord.Interaction):
-    global JOGO_CACHE
-    if not JOGO_CACHE:
-        JOGO_CACHE = buscar_jogo_na_api()
-
-    if not JOGO_CACHE:
-        await interaction.response.send_message("❌ Não encontrei nenhum jogo agendado para gerar a previsão.", ephemeral=True)
+@bot.tree.command(name="proximojogo", description="Mostra os detalhes do próximo jogo do Cruzeiro.")
+async def proximojogo_cmd(interaction: discord.Interaction):
+    jogo = carregar_dados(JOGO_ATIVO_FILE)
+    if not jogo:
+        await interaction.response.send_message("❌ Nenhum jogo foi configurado no momento pela administração.", ephemeral=True)
         return
 
-    mandante = JOGO_CACHE["homeTeam"]["name"]
-    visitante = JOGO_CACHE["awayTeam"]["name"]
+    embed = discord.Embed(
+        title="🦊 Próximo Jogo do Cruzeiro",
+        description=f"⚽ **{jogo['mandante']} x {jogo['visitante']}**\n"
+                    f"📅 **Horário:** {jogo['horario']}\n"
+                    f"🏟️ **Local:** {jogo['estadio']}\n\n"
+                    f"👇 *Deixe seu palpite oficial usando o comando* `/palpite`!",
+        color=0x0033A0
+    )
+    await interaction.response.send_message(embed=embed)
+
+
+@bot.tree.command(name="palpite", description="Abre o painel para registrar seu palpite único.")
+async def palpite_cmd(interaction: discord.Interaction):
+    jogo = carregar_dados(JOGO_ATIVO_FILE)
+    if not jogo:
+        await interaction.response.send_message("❌ Nenhum jogo ativo no momento para palpites.", ephemeral=True)
+        return
+
+    await interaction.response.send_modal(PalpiteModal(jogo))
+
+
+@bot.tree.command(name="previsao", description="Análise de IA baseada no próximo adversário.")
+async def previsao_cmd(interaction: discord.Interaction):
+    jogo = carregar_dados(JOGO_ATIVO_FILE)
+    if not jogo:
+        await interaction.response.send_message("❌ Nenhum jogo ativo para gerar previsão.", ephemeral=True)
+        return
 
     embed = discord.Embed(
         title="🤖 Análise IA - Próxima Partida",
-        description=f"**Confronto:** {mandante} x {visitante}\n\n"
+        description=f"**Confronto:** {jogo['mandante']} x {jogo['visitante']}\n\n"
                     f"**Últimos 5 jogos gerais:**\n"
                     f"Cruzeiro: 🟢🟢🟡🔴🟢\n"
                     f"Adversário: 🟡🟢🔴🟢🟡\n\n"
@@ -238,23 +239,81 @@ async def previsao_cmd(interaction: discord.Interaction):
                     f"• Vitória Cruzeiro: 45%\n"
                     f"• Empate: 30%\n"
                     f"• Derrota: 25%\n\n"
-                    f"💡 *Análise baseada no momento atual das equipes, desempenho recente e mando de campo.*",
+                    f"💡 *Análise baseada no momento atual das equipes.*",
         color=0x0033A0
     )
     await interaction.response.send_message(embed=embed)
 
 
-@bot.tree.command(name="palpite", description="Abre o painel para dar seu palpite no próximo jogo do Cruzeiro.")
-async def palpite_cmd(interaction: discord.Interaction):
-    global JOGO_CACHE
-    if not JOGO_CACHE:
-        JOGO_CACHE = buscar_jogo_na_api()
-
-    if not JOGO_CACHE:
-        await interaction.response.send_message("❌ Não encontrei nenhum jogo agendado do Cruzeiro no momento.", ephemeral=True)
+@bot.tree.command(name="placarfinal", description="[Admin] Insere o placar final, calcula pontos e atualiza o ranking.")
+@app_commands.checks.has_permissions(administrator=True)
+async def placarfinal_cmd(interaction: discord.Interaction, gols_mandante: int, gols_visitante: int):
+    jogo = carregar_dados(JOGO_ATIVO_FILE)
+    if not jogo:
+        await interaction.response.send_message("❌ Não há nenhum jogo ativo salvo para processar o placar.", ephemeral=True)
         return
 
-    await interaction.response.send_modal(PalpiteModal(JOGO_CACHE))
+    palpites = carregar_dados(PALPITES_FILE)
+    if not palpites:
+        await interaction.response.send_message("❌ Nenhum usuário enviou palpite para esta partida.", ephemeral=True)
+        return
+
+    ranking = carregar_dados(RANKING_FILE)
+    
+    resultados_parciais = ""
+    
+    # Regra de pontuação:
+    # Placar Exato = 3 pontos
+    # Acertar Vencedor/Empate = 1 ponto
+    # Errar tudo = 0 pontos
+    
+    vencedor_real = "mandante" if gols_mandante > gols_visitante else ("visitante" if gols_visitante > gols_mandante else "empate")
+
+    for uid, dados in palpites.items():
+        g_m = dados["g_mand"]
+        g_v = dados["g_vis"]
+        nome = dados["nome"]
+        
+        vencedor_palpite = "mandante" if g_m > g_v else ("visitante" if g_v > g_m else "empate")
+        
+        pontos_ganhos = 0
+        status_texto = "❌ Errou"
+        
+        if g_m == gols_mandante and g_v == gols_visitante:
+            pontos_ganhos = 3
+            status_texto = "🎯 Acertou em cheio! (+3 pts)"
+        elif vencedor_palpite == vencedor_real:
+            pontos_ganhos = 1
+            status_texto = "✅ Acertou o vencedor! (+1 pt)"
+
+        # Atualiza ranking geral
+        if uid not in ranking:
+            ranking[uid] = {"nome": nome, "pontos": 0}
+        
+        ranking[uid]["pontos"] += pontos_ganhos
+        
+        resultados_parciais += f"- <@{uid}> ({g_m}x{g_v}) — **{status_texto}**\n"
+
+    salvar_dados(RANKING_FILE, ranking)
+
+    # Ordena ranking
+    ranking_ordenado = sorted(ranking.items(), key=lambda x: x[1]["pontos"], reverse=True)
+    
+    texto_ranking = ""
+    for idx, (uid, info) in enumerate(ranking_ordenado, start=1):
+        texto_ranking += f"**{idx}º** — {info['nome']} (`{info['pontos']} pts`)\n"
+
+    embed = discord.Embed(
+        title=f"🏁 Resultado Final: {jogo['mandante']} {gols_mandante} x {gols_visitante} {jogo['visitante']}",
+        description=f"**Apuração dos Palpites:**\n{resultados_parciais}\n\n🏆 **Ranking Atualizado do Bolão:**\n{texto_ranking}",
+        color=0x0033A0
+    )
+    
+    # Limpa o jogo ativo para forçar novo /setarjogo na próxima partida
+    if os.path.exists(JOGO_ATIVO_FILE):
+        os.remove(JOGO_ATIVO_FILE)
+
+    await interaction.response.send_message(embed=embed)
 
 
 @bot.tree.command(name="ranking", description="Mostra a classificação geral do Bolão do Cruzeiro.")
@@ -275,11 +334,6 @@ async def ranking_cmd(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed)
 
 
-@tasks.loop(minutes=10)
-async def checar_jogos():
-    pass
-
-# Inicia o servidor web em uma thread separada para o Render não dar erro de porta
+# Inicializa o web server para o Render e executa o bot
 threading.Thread(target=run_web).start()
-
 bot.run(TOKEN_DO_BOT)

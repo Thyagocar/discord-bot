@@ -310,10 +310,10 @@ async def setarjogo_cmd(interaction: discord.Interaction, mandante: str, visitan
     config = carregar_dados(CONFIG_FILE)
     if "canal_notif" in config and "cargo_notif" in config:
         canal = interaction.guild.get_channel(int(config["canal_notif"]))
-        cargo = interaction.guild.get_role(int(config["cargo_notif"]))
+        cargo_id_str = config["cargo_notif"]
         canal_cmd_id = config.get("canal_comandos")
         
-        if canal and cargo:
+        if canal:
             canal_mencao = f"<#{canal_cmd_id}>" if canal_cmd_id else "no canal de palpites"
             embed_aviso = discord.Embed(
                 title="📢 Novo Jogo Cadastrado no Bolão!",
@@ -321,7 +321,15 @@ async def setarjogo_cmd(interaction: discord.Interaction, mandante: str, visitan
                             f"O bolão está aberto! Vá até {canal_mencao} e use `/palpite` para registrar sua aposta.",
                 color=0x0033A0
             )
-            await canal.send(content=cargo.mention, embed=embed_aviso)
+            
+            # Tratativa correta para mencionar o cargo ou @everyone sem bugar
+            if cargo_id_str == str(interaction.guild.default_role.id):
+                mencao_texto = "@everyone"
+            else:
+                role_obj = interaction.guild.get_role(int(cargo_id_str))
+                mencao_texto = role_obj.mention if role_obj else ""
+
+            await canal.send(content=mencao_texto, embed=embed_aviso)
 
     embed = discord.Embed(
         title="⚽ Jogo Definido com Sucesso!",
@@ -501,7 +509,7 @@ async def placarfinal_cmd(interaction: discord.Interaction, gols_mandante: int, 
         if role_destaque:
             novo_lider_uid = ranking_ordenado[0][0]
             
-            # Remove o cargo de todo mundo que não é o novo líder (incluindo o antigo líder)
+            # Remove o cargo de todo mundo que não é o novo líder
             for member in role_destaque.members:
                 if str(member.id) != novo_lider_uid:
                     try:
@@ -514,8 +522,8 @@ async def placarfinal_cmd(interaction: discord.Interaction, gols_mandante: int, 
                 membro_lider = interaction.guild.get_member(int(novo_lider_uid))
                 if membro_lider and role_destaque not in membro_lider.roles:
                     await membro_lider.add_roles(role_destaque)
-            except:
-                pass
+            except Exception as e:
+                print(f"Erro ao atribuir cargo de destaque: {e}")
     # ============================================================================
 
     texto_ranking = ""

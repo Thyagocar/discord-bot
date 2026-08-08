@@ -20,6 +20,9 @@ CRUZEIRO_ID = 1783  # ID oficial do Cruzeiro na API
 # Arquivos locais
 PALPITES_FILE = "palpites.json"
 RANKING_FILE = "ranking.json"
+
+# Variável de cache para o próximo jogo (evita delay no comando)
+JOGO_CACHE = None
 # =============================================================
 
 # Configuração de Intents
@@ -41,8 +44,7 @@ def salvar_dados(arquivo, dados):
     with open(arquivo, "w", encoding="utf-8") as f:
         json.dump(dados, f, indent=4, ensure_ascii=False)
 
-def obter_proximo_jogo():
-    # URL corrigida para buscar estritamente as partidas agendadas do Cruzeiro em qualquer competição
+def buscar_jogo_na_api():
     url = f"https://api.football-data.org/v4/teams/{CRUZEIRO_ID}/matches?status=SCHEDULED"
     try:
         res = requests.get(url, headers=HEADERS)
@@ -53,6 +55,12 @@ def obter_proximo_jogo():
     except Exception as e:
         print(f"Erro ao buscar jogo do Cruzeiro: {e}")
     return None
+
+@tasks.loop(minutes=30)
+async def atualizar_cache_jogo():
+    global JOGO_CACHE
+    JOGO_CACHE = buscar_jogo_na_api()
+    print("🔄 Cache do próximo jogo do Cruzeiro atualizado.")
 
 
 # --- PAINEL POP-UP (MODAL) DO PALPITE ---
@@ -119,7 +127,7 @@ class PalpiteModal(ui.Modal):
                         f"⚽ **{mandante_nome} {g_mandante} x {g_visitante} {visitante_nome}**",
             color=0x0033A0
         )
-        await interaction.response.send_message(embed=embed)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
 # ================= EVENTOS DO BOT =================
@@ -130,8 +138,14 @@ async def on_ready():
         synced = await bot.tree.sync()
         print(f"🤖 Bot conectado com sucesso como: {bot.user.name}")
         print(f"⚙️ Comandos de barra (/) sincronizados: {len(synced)}")
+        
+        global JOGO_CACHE
+        JOGO_CACHE = buscar_jogo_na_api()
+
         if not checar_jogos.is_running():
             checar_jogos.start()
+        if not atualizar_cache_jogo.is_running():
+            atualizar_cache_jogo.start()
     except Exception as e:
         print(f"Erro ao inicializar o bot: {e}")
 
@@ -176,18 +190,17 @@ async def on_member_join(member):
 
 @bot.tree.command(name="palpite", description="Abre o painel para dar seu palpite no próximo jogo do Cruzeiro.")
 async def palpite_cmd(interaction: discord.Interaction):
-    jogo = obter_proximo_jogo()
-    if not jogo:
+    if not JOGO_CACHE:
         await interaction.response.send_message("❌ Não encontrei nenhum jogo agendado do Cruzeiro no momento.", ephemeral=True)
         return
 
-    await interaction.response.send_modal(PalpiteModal(jogo))
+    await interaction.response.send_modal(PalpiteModal(JOGO_CACHE))
 
 @bot.tree.command(name="ranking", description="Mostra a classificação geral do Bolão do Cruzeiro.")
 async def ranking_cmd(interaction: discord.Interaction):
     ranking = carregar_dados(RANKING_FILE)
     if not ranking:
-        await interaction.response.send_message("🏆 O ranking do bolão ainda está vazio.")
+        await interaction.response.send_message("🏆 O ranking do bolão ainda está vazio.", ephemeral=True)
         return
 
     ranking_ordenado = sorted(ranking.items(), key=lambda x: x[1]["pontos"], reverse=True)

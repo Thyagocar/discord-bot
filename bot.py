@@ -57,65 +57,96 @@ def verificar_permissao_adm(interaction: discord.Interaction) -> bool:
     return False
 
 
-# ================= PAINEL DE CONFIGURAÇÃO (INTERATIVO COM SELECTS) =================
+# ================= MODAL DE CONFIGURAÇÃO MANUAL =================
+
+class ConfigModal(ui.Modal, title="⚙️ Configuração Geral do Bot"):
+    cargos_adm = ui.TextInput(
+        label="ID ou Nome exato do Cargo Admin",
+        placeholder="Ex: @Moderador ou ID numérico",
+        required=True,
+        max_length=100
+    )
+    canal_comandos = ui.TextInput(
+        label="Nome exato do Canal de Palpites",
+        placeholder="Ex: comandos-bots",
+        required=True,
+        max_length=100
+    )
+    canal_ranking = ui.TextInput(
+        label="Nome exato do Canal de Ranking",
+        placeholder="Ex: ranking",
+        required=True,
+        max_length=100
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("❌ Apenas administradores podem configurar o bot.", ephemeral=True)
+            return
+
+        guild = interaction.guild
+        
+        # Valida Cargo
+        cargo_input = self.cargos_adm.value.strip()
+        cargo_id = None
+        for role in guild.roles:
+            if cargo_input.lower() in role.name.lower() or cargo_input == str(role.id):
+                cargo_id = str(role.id)
+                break
+
+        # Valida Canal de Comandos
+        cmd_input = self.canal_comandos.value.strip().replace("#", "")
+        canal_cmd_id = None
+        for channel in guild.text_channels:
+            if cmd_input.lower() in channel.name.lower() or cmd_input == str(channel.id):
+                canal_cmd_id = str(channel.id)
+                break
+
+        # Valida Canal de Ranking
+        rank_input = self.canal_ranking.value.strip().replace("#", "")
+        canal_rank_id = None
+        for channel in guild.text_channels:
+            if rank_input.lower() in channel.name.lower() or rank_input == str(channel.id):
+                canal_rank_id = str(channel.id)
+                break
+
+        config = carregar_dados(CONFIG_FILE)
+        if cargo_id:
+            config["cargos_adm"] = [cargo_id]
+        if canal_cmd_id:
+            config["canal_comandos"] = canal_cmd_id
+        if canal_rank_id:
+            config["canal_ranking"] = canal_rank_id
+
+        salvar_dados(CONFIG_FILE, config)
+
+        await interaction.response.send_message(
+            f"✅ Configurações salvas com sucesso!\n"
+            f"• **Cargo Admin ID:** {cargo_id or 'Não encontrado'}\n"
+            f"• **Canal de Palpites:** <#{canal_cmd_id}>" if canal_cmd_id else "✅ Configurado!",
+            ephemeral=True
+        )
+
 
 class PainelConfigView(ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @ui.button(label="📋 Comandos Admin & Ajuda", style=discord.ButtonStyle.primary, custom_id="btn_ajuda_admin", row=0)
+    @ui.button(label="⚙️ Configurar Servidor", style=discord.ButtonStyle.success, custom_id="btn_abrir_config")
+    async def abrir_config(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(ConfigModal())
+
+    @ui.button(label="📋 Comandos Admin & Ajuda", style=discord.ButtonStyle.primary, custom_id="btn_ajuda_admin")
     async def ajuda_admin(self, interaction: discord.Interaction, button: discord.ui.Button):
         embed = discord.Embed(
             title="🛠️ Painel de Ajuda - Administradores",
             description="Aqui estão os comandos exclusivos para gerenciar o Bolão:\n\n"
-                        "📌 **`/setarjogo`** — Define o próximo confronto, horário, adversário e estádio.\n"
+                        "📌 **`/setarjogo`** — Define o próximo confronto, horário e estádio.\n"
                         "🏁 **`/placarfinal`** — Insere o resultado final, calcula os pontos automaticamente e gera o ranking.\n\n"
-                        "💡 *Dica:* Utilize os menus abaixo para configurar cargos permitidos e canais do bot!",
+                        "💡 *Dica:* Clique no botão verde **Configurar Servidor** para definir canais e cargos sem limitações!",
             color=0x0033A0
         )
         await interaction.response.send_message(embed=embed, ephemeral=True)
-
-    # 1. Cargos de Adm
-    @ui.select(cls=ui.RoleSelect, placeholder="⚙️ Selecione os cargos que podem usar comandos adm", min_values=1, max_values=5, custom_id="select_cargos_adm", row=1)
-    async def select_cargos(self, interaction: discord.Interaction, select: ui.RoleSelect):
-        if not interaction.user.guild_permissions.administrator:
-            await interaction.response.send_message("❌ Apenas administradores do servidor podem usar esta configuração.", ephemeral=True)
-            return
-
-        config = carregar_dados(CONFIG_FILE)
-        config["cargos_adm"] = [str(role.id) for role in select.values]
-        salvar_dados(CONFIG_FILE, config)
-
-        cargos_nomes = ", ".join([role.name for role in select.values])
-        await interaction.response.send_message(f"✅ Cargos de Administrador atualizados com sucesso: **{cargos_nomes}**", ephemeral=True)
-
-    # 2. Canal de Comandos do Bot
-    @ui.select(cls=ui.ChannelSelect, channel_types=[discord.ChannelType.text], placeholder="💬 Selecione o canal para /proximojogo e /palpite", min_values=1, max_values=1, custom_id="select_canal_comandos", row=2)
-    async def select_canal_cmd(self, interaction: discord.Interaction, select: ui.ChannelSelect):
-        if not interaction.user.guild_permissions.administrator:
-            await interaction.response.send_message("❌ Apenas administradores do servidor podem usar esta configuração.", ephemeral=True)
-            return
-
-        canal = select.values[0]
-        config = carregar_dados(CONFIG_FILE)
-        config["canal_comandos"] = str(canal.id)
-        salvar_dados(CONFIG_FILE, config)
-
-        await interaction.response.send_message(f"✅ Canal de comandos configurado para: {canal.mention}", ephemeral=True)
-
-    # 3. Canal de Ranking
-    @ui.select(cls=ui.ChannelSelect, channel_types=[discord.ChannelType.text], placeholder="🏆 Selecione o canal onde o ranking será postado", min_values=1, max_values=1, custom_id="select_canal_ranking", row=3)
-    async def select_canal_rank(self, interaction: discord.Interaction, select: ui.ChannelSelect):
-        if not interaction.user.guild_permissions.administrator:
-            await interaction.response.send_message("❌ Apenas administradores do servidor podem usar esta configuração.", ephemeral=True)
-            return
-
-        canal = select.values[0]
-        config = carregar_dados(CONFIG_FILE)
-        config["canal_ranking"] = str(canal.id)
-        salvar_dados(CONFIG_FILE, config)
-
-        await interaction.response.send_message(f"✅ Canal de publicação do ranking configurado para: {canal.mention}", ephemeral=True)
 
 
 @bot.event
@@ -134,10 +165,7 @@ async def on_guild_join(guild):
     embed = discord.Embed(
         title="🤖 Painel de Configuração do Bolão - Cruzeiro",
         description="Este canal é **privado** e visível apenas para administradores.\n\n"
-                    "Utilize os menus interativos abaixo para configurar rapidamente:\n"
-                    "1. **Cargos permitidos** para comandos administrativos.\n"
-                    "2. **Canal onde a torcida fará os palpites** (`/proximojogo` e `/palpite`).\n"
-                    "3. **Canal oficial de destino dos rankings** e resultados.",
+                    "Clique no botão abaixo para abrir o painel de configuração e digitar os nomes dos canais e cargos desejados.",
         color=0x0033A0
     )
     
@@ -237,7 +265,7 @@ async def setarjogo_cmd(interaction: discord.Interaction, mandante: str, visitan
         "estadio": estadio
     }
     salvar_dados(JOGO_ATIVO_FILE, jogo)
-    salvar_dados(PALPITES_FILE, {}) # Limpa palpites anteriores para começar do zero
+    salvar_dados(PALPITES_FILE, {}) 
 
     embed = discord.Embed(
         title="⚽ Novo Jogo Configurado!",

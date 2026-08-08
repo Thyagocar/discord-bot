@@ -57,90 +57,39 @@ def verificar_permissao_adm(interaction: discord.Interaction) -> bool:
     return False
 
 
-# ================= MODAL DE CONFIGURAÇÃO MANUAL =================
+# ================= AUTOCOMPLETAR INTELIGENTE PARA CARGOS E CANAIS =================
 
-class ConfigModal(ui.Modal, title="⚙️ Configuração Geral do Bot"):
-    cargos_adm = ui.TextInput(
-        label="ID ou Nome exato do Cargo Admin",
-        placeholder="Ex: @Moderador ou ID numérico",
-        required=True,
-        max_length=100
-    )
-    canal_comandos = ui.TextInput(
-        label="Nome exato do Canal de Palpites",
-        placeholder="Ex: comandos-bots",
-        required=True,
-        max_length=100
-    )
-    canal_ranking = ui.TextInput(
-        label="Nome exato do Canal de Ranking",
-        placeholder="Ex: ranking",
-        required=True,
-        max_length=100
-    )
+async def autocomplete_cargos(interaction: discord.Interaction, current: str):
+    # Retorna todos os cargos do servidor que combinem com o que o adm está digitando
+    return [
+        app_commands.Choice(name=role.name, value=str(role.id))
+        for role in interaction.guild.roles if current.lower() in role.name.lower()
+    ][:25]
 
-    async def on_submit(self, interaction: discord.Interaction):
-        if not interaction.user.guild_permissions.administrator:
-            await interaction.response.send_message("❌ Apenas administradores podem configurar o bot.", ephemeral=True)
-            return
+async def autocomplete_canais(interaction: discord.Interaction, current: str):
+    # Retorna todos os canais de texto do servidor em tempo real
+    return [
+        app_commands.Choice(name=f"#{channel.name}", value=str(channel.id))
+        for channel in interaction.guild.text_channels if current.lower() in channel.name.lower()
+    ][:25]
 
-        guild = interaction.guild
-        
-        cargo_input = self.cargos_adm.value.strip()
-        cargo_id = None
-        for role in guild.roles:
-            if cargo_input.lower() in role.name.lower() or cargo_input == str(role.id):
-                cargo_id = str(role.id)
-                break
 
-        cmd_input = self.canal_comandos.value.strip().replace("#", "")
-        canal_cmd_id = None
-        for channel in guild.text_channels:
-            if cmd_input.lower() in channel.name.lower() or cmd_input == str(channel.id):
-                canal_cmd_id = str(channel.id)
-                break
-
-        rank_input = self.canal_ranking.value.strip().replace("#", "")
-        canal_rank_id = None
-        for channel in guild.text_channels:
-            if rank_input.lower() in channel.name.lower() or rank_input == str(channel.id):
-                canal_rank_id = str(channel.id)
-                break
-
-        config = carregar_dados(CONFIG_FILE)
-        if cargo_id:
-            config["cargos_adm"] = [cargo_id]
-        if canal_cmd_id:
-            config["canal_comandos"] = canal_cmd_id
-        if canal_rank_id:
-            config["canal_ranking"] = canal_rank_id
-
-        salvar_dados(CONFIG_FILE, config)
-
-        await interaction.response.send_message(
-            f"✅ Configurações salvas com sucesso!\n"
-            f"• **Cargo Admin ID:** {cargo_id or 'Não encontrado'}\n"
-            f"• **Canal de Palpites:** <#{canal_cmd_id}>" if canal_cmd_id else "✅ Configurado!",
-            ephemeral=True
-        )
-
+# ================= MODAL DO BOTÃO DO PAINEL =================
 
 class PainelConfigView(ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @ui.button(label="⚙️ Configurar Servidor", style=discord.ButtonStyle.success, custom_id="btn_abrir_config")
-    async def abrir_config(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(ConfigModal())
-
-    @ui.button(label="📋 Comandos Admin & Ajuda", style=discord.ButtonStyle.primary, custom_id="btn_ajuda_admin")
+    @ui.button(label="📋 Como Configurar o Servidor", style=discord.ButtonStyle.primary, custom_id="btn_ajuda_admin", row=0)
     async def ajuda_admin(self, interaction: discord.Interaction, button: discord.ui.Button):
         embed = discord.Embed(
             title="🛠️ Painel de Ajuda - Administradores",
-            description="Aqui estão os comandos exclusivos para gerenciar o Bolão:\n\n"
-                        "📌 **`/setarjogo`** — Define o próximo confronto, horário e estádio.\n"
-                        "🏁 **`/placarfinal`** — Insere o resultado, artilheiros reais, calcula pontos e gera o ranking.\n\n"
-                        "💡 *Dica:* Clique no botão verde **Configurar Servidor** para definir canais e cargos!",
+            description="Para garantir que **todos** os cargos e canais apareçam sem limitações do Discord, utilize os comandos de barra (`/`) abaixo:\n\n"
+                        "⚙️ **`/configcargo`** — Define o cargo com permissão de adm.\n"
+                        "💬 **`/configcanal`** — Define o canal onde a torcida envia palpites.\n"
+                        "🏆 **`/configranking`** — Define o canal onde o ranking será postado.\n"
+                        "📌 **`/setarjogo`** — Define o próximo confronto.\n"
+                        "🏁 **`/placarfinal`** — Insere o placar, marcadores e gera o ranking.",
             color=0x0033A0
         )
         await interaction.response.send_message(embed=embed, ephemeral=True)
@@ -162,14 +111,17 @@ async def on_guild_join(guild):
     embed = discord.Embed(
         title="🤖 Painel de Configuração do Bolão - Cruzeiro",
         description="Este canal é **privado** e visível apenas para administradores.\n\n"
-                    "Clique no botão abaixo para abrir o painel de configuração e digitar os nomes dos canais e cargos desejados.",
+                    "Para configurar os cargos e canais com busca inteligente (evitando que faltem opções), use os comandos:\n"
+                    "• `/configcargo`\n"
+                    "• `/configcanal`\n"
+                    "• `/configranking`",
         color=0x0033A0
     )
     
     await canal.send(embed=embed, view=PainelConfigView())
 
 
-# ================= MODAL DE PALPITE (COM GOLS E ARTILHEIROS) =================
+# ================= MODAL DE PALPITE (COM GOLS E MARCADOR) =================
 
 class PalpiteModal(ui.Modal):
     def __init__(self, jogo):
@@ -193,8 +145,8 @@ class PalpiteModal(ui.Modal):
             max_length=2,
             required=True
         )
-        self.artilheiros = ui.TextInput(
-            label="Quem fará os gols? (Opcional)",
+        self.marcador = ui.TextInput(
+            label="Quem fará gol na partida? (Opcional)",
             placeholder="Ex: Kaio Jorge, Dinenno",
             style=discord.TextStyle.paragraph,
             required=False,
@@ -203,7 +155,7 @@ class PalpiteModal(ui.Modal):
 
         self.add_item(self.gols_mandante)
         self.add_item(self.gols_visitante)
-        self.add_item(self.artilheiros)
+        self.add_item(self.marcador)
 
     async def on_submit(self, interaction: discord.Interaction):
         if not (self.gols_mandante.value.isdigit() and self.gols_visitante.value.isdigit()):
@@ -212,7 +164,7 @@ class PalpiteModal(ui.Modal):
 
         g_mandante = int(self.gols_mandante.value)
         g_visitante = int(self.gols_visitante.value)
-        autores = self.artilheiros.value.strip() or "Nenhum citado"
+        marcadores_usuario = self.marcador.value.strip() or "Nenhum citado"
 
         user_id = str(interaction.user.id)
         user_name = interaction.user.display_name
@@ -224,7 +176,7 @@ class PalpiteModal(ui.Modal):
             await interaction.response.send_message(
                 f"❌ Você já enviou seu palpite para este jogo e ele está trancado!\n"
                 f"Seu palpite salvo: **{self.jogo['mandante']} {p_antigo['g_mand']} x {p_antigo['g_vis']} {self.jogo['visitante']}**\n"
-                f"⚽ Artilheiros: *{p_antigo['artilheiros']}*", 
+                f"⚽ Marcador: *{p_antigo['marcador']}*", 
                 ephemeral=True
             )
             return
@@ -233,14 +185,14 @@ class PalpiteModal(ui.Modal):
             "nome": user_name,
             "g_mand": g_mandante,
             "g_vis": g_visitante,
-            "artilheiros": autores
+            "marcador": marcadores_usuario
         }
         salvar_dados(PALPITES_FILE, palpites)
 
         embed = discord.Embed(
             title="🎯 Palpite Registrado com Sucesso!",
             description=f"Partida: **{self.jogo['mandante']} {g_mandante} x {g_visitante} {self.jogo['visitante']}**\n"
-                        f"⚽ Artilheiros Palpitados: *{autores}*\n\n"
+                        f"⚽ Marcador Palpitado: *{marcadores_usuario}*\n\n"
                         f"🔒 Salvo com sucesso! Você só poderá enviar novo palpite após o adm setar outra partida.",
             color=0x0033A0
         )
@@ -259,7 +211,56 @@ async def on_ready():
         print(f"Erro ao sincronizar comandos: {e}")
 
 
-# ================= COMANDOS DO BOT =================
+# ================= COMANDOS DE CONFIGURAÇÃO COM AUTOCOMPLETAR =================
+
+@bot.tree.command(name="configcargo", description="[Admin] Define o cargo com permissão para usar comandos administrativos.")
+@app_commands.describe(cargo_id="Selecione ou digite o nome do cargo")
+@app_commands.autocomplete(cargo_id=autocomplete_cargos)
+async def configcargo_cmd(interaction: discord.Interaction, cargo_id: str):
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("❌ Apenas administradores podem configurar o bot.", ephemeral=True)
+        return
+
+    config = carregar_dados(CONFIG_FILE)
+    config["cargos_adm"] = [cargo_id]
+    salvar_dados(CONFIG_FILE, config)
+
+    role = interaction.guild.get_role(int(cargo_id))
+    nome_cargo = role.name if role else cargo_id
+    await interaction.response.send_message(f"✅ Cargo de Administrador configurado com sucesso para: **{nome_cargo}**", ephemeral=True)
+
+
+@bot.tree.command(name="configcanal", description="[Admin] Define o canal onde a torcida usará /proximojogo e /palpite.")
+@app_commands.describe(canal_id="Selecione ou digite o canal de palpites")
+@app_commands.autocomplete(canal_id=autocomplete_canais)
+async def configcanal_cmd(interaction: discord.Interaction, canal_id: str):
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("❌ Apenas administradores podem configurar o bot.", ephemeral=True)
+        return
+
+    config = carregar_dados(CONFIG_FILE)
+    config["canal_comandos"] = canal_id
+    salvar_dados(CONFIG_FILE, config)
+
+    await interaction.response.send_message(f"✅ Canal de palpites configurado para: <#{canal_id}>", ephemeral=True)
+
+
+@bot.tree.command(name="configranking", description="[Admin] Define o canal onde o ranking final será publicado.")
+@app_commands.describe(canal_id="Selecione ou digite o canal de ranking")
+@app_commands.autocomplete(canal_id=autocomplete_canais)
+async def configranking_cmd(interaction: discord.Interaction, canal_id: str):
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("❌ Apenas administradores podem configurar o bot.", ephemeral=True)
+        return
+
+    config = carregar_dados(CONFIG_FILE)
+    config["canal_ranking"] = canal_id
+    salvar_dados(CONFIG_FILE, config)
+
+    await interaction.response.send_message(f"✅ Canal de publicação do ranking configurado para: <#{canal_id}>", ephemeral=True)
+
+
+# ================= OUTROS COMANDOS DO BOT =================
 
 @bot.tree.command(name="setarjogo", description="[Admin] Define manualmente o próximo jogo.")
 @app_commands.describe(mandante="Nome do time mandante", visitante="Nome do time visitante", horario="Data e horário do jogo", estadio="Local da partida")
@@ -310,7 +311,7 @@ async def proximojogo_cmd(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed)
 
 
-@bot.tree.command(name="palpite", description="Abre o painel para registrar seu palpite de placar e artilheiros.")
+@bot.tree.command(name="palpite", description="Abre o painel para registrar seu palpite de placar e marcador.")
 async def palpite_cmd(interaction: discord.Interaction):
     config = carregar_dados(CONFIG_FILE)
     canal_permitido = config.get("canal_comandos")
@@ -327,13 +328,13 @@ async def palpite_cmd(interaction: discord.Interaction):
     await interaction.response.send_modal(PalpiteModal(jogo))
 
 
-@bot.tree.command(name="placarfinal", description="[Admin] Insere o placar final, artilheiros, calcula pontos e gera o ranking.")
+@bot.tree.command(name="placarfinal", description="[Admin] Insere o placar final, marcadores, calcula pontos e gera o ranking.")
 @app_commands.describe(
     gols_mandante="Gols do mandante", 
     gols_visitante="Gols do visitante",
-    artilheiros_reais="Quem fez os gols na partida real (Ex: Kaio Jorge)"
+    marcadores_reais="Quem fez os gols na partida real (Ex: Kaio Jorge)"
 )
-async def placarfinal_cmd(interaction: discord.Interaction, gols_mandante: int, gols_visitante: int, artilheiros_reais: str):
+async def placarfinal_cmd(interaction: discord.Interaction, gols_mandante: int, gols_visitante: int, marcadores_reais: str):
     if not verificar_permissao_adm(interaction):
         await interaction.response.send_message("❌ Você não tem permissão para usar este comando administrativo.", ephemeral=True)
         return
@@ -356,7 +357,7 @@ async def placarfinal_cmd(interaction: discord.Interaction, gols_mandante: int, 
         g_m = dados["g_mand"]
         g_v = dados["g_vis"]
         nome = dados["nome"]
-        art_palpite = dados["artilheiros"].lower()
+        marc_palpite = dados["marcador"].lower()
         
         vencedor_palpite = "mandante" if g_m > g_v else ("visitante" if g_v > g_m else "empate")
         pontos_ganhos = 0
@@ -370,10 +371,10 @@ async def placarfinal_cmd(interaction: discord.Interaction, gols_mandante: int, 
             pontos_ganhos = 1
             status_texto = "✅ Acertou Vencedor! (+1 pt)"
 
-        # Bônus extra opcional se acertar parte dos artilheiros citados
-        if any(art.strip() in art_palpite for art in artilheiros_reais.lower().split(',')) and art_palpite != "nenhum citado":
-            pontos_ganhos += 1
-            status_texto += " + ⚽ Artilheiro (+1 pt)"
+        # Bônus de +2 pontos se acertar o marcador
+        if any(m.strip() in marc_palpite for m in marcadores_reais.lower().split(',')) and marc_palpite != "nenhum citado":
+            pontos_ganhos += 2
+            status_texto += " + ⚽ Acertou o Marcador (+2 pts)"
 
         if uid not in ranking:
             ranking[uid] = {"nome": nome, "pontos": 0}
@@ -390,7 +391,7 @@ async def placarfinal_cmd(interaction: discord.Interaction, gols_mandante: int, 
 
     embed = discord.Embed(
         title=f"🏁 Resultado Final: {jogo['mandante']} {gols_mandante} x {gols_visitante} {jogo['visitante']}",
-        description=f"⚽ **Artilheiros Oficiais:** {artilheiros_reais}\n\n"
+        description=f"⚽ **Marcadores Oficiais:** {marcadores_reais}\n\n"
                     f"**Apuração dos Palpites:**\n{resultados_parciais}\n\n"
                     f"🏆 **Ranking Geral Atualizado:**\n{texto_ranking}",
         color=0x0033A0

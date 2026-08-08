@@ -8,14 +8,15 @@ from discord.ext import commands, tasks
 # ================= CONFIGURAÇÕES DO SERVIDOR =================
 ID_SERVIDOR_PRINCIPAL = 1528068312045584434 
 LINK_CONVITE = "https://discord.gg/QsAayXg4UA"
-CANAL_RANKING_ID = 1535446377226702909  # Substitua pelo ID do canal do ranking
+CANAL_RANKING_ID = 1535446377226702909 
 
 # Configurações de Futebol e Bot
 FOOTBALL_DATA_KEY = "ee82d989ea224f0499aef3706caa09d2"
-TOKEN_DO_BOT = "MTUzNTQwNDM4MjY4OTAzNDM0Mw.Gimfc9.Im6f31GSdpvEqBu0esDjymOI2RZhEHJkFC_GK4"
+# O token é obtido de forma segura pela variável de ambiente da Render
+TOKEN_DO_BOT = os.getenv("DISCORD_TOKEN")
 
 HEADERS = {"X-Auth-Token": FOOTBALL_DATA_KEY}
-CRUZEIRO_ID = 1783  # ID do Cruzeiro na Football-Data.org
+CRUZEIRO_ID = 1783 
 
 # Arquivos locais
 PALPITES_FILE = "palpites.json"

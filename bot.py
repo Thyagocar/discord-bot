@@ -58,16 +58,24 @@ def salvar_dados(arquivo, dados):
         json.dump(dados, f, indent=4, ensure_ascii=False)
 
 def buscar_jogo_na_api():
-    url = "https://sofascore.p.rapidapi.com/teams/get-upcoming-events"
+    url = "https://sofascore.p.rapidapi.com/teams/get-events" 
     querystring = {"teamId": str(CRUZEIRO_ID_SOFASCORE), "page": "0"}
     try:
         res = requests.get(url, headers=HEADERS, params=querystring, timeout=10)
         if res.status_code == 200:
-            events = res.json().get("events", [])
-            if events:
-                evento = events[0]
+            data = res.json()
+            events = data.get("events", [])
+            
+            # Filtra apenas jogos futuros com base no timestamp atual
+            agora = datetime.datetime.now().timestamp()
+            eventos_futuros = [e for e in events if e.get("startTimestamp", 0) > agora]
+            
+            # Ordena pelo jogo mais próximo cronologicamente
+            eventos_futuros.sort(key=lambda x: x.get("startTimestamp", 0))
+            
+            if eventos_futuros:
+                evento = eventos_futuros[0]
                 
-                # Tratamento de data/hora
                 timestamp = evento.get("startTimestamp")
                 data_str = "Data a confirmar"
                 if timestamp:
@@ -182,7 +190,7 @@ async def on_ready():
         print(f"Erro ao inicializar o bot: {e}")
 
 
-# ================= NOVOS COMANDOS =================
+# ================= COMANDOS DO BOT =================
 
 @bot.tree.command(name="proximojogo", description="Mostra os detalhes do próximo jogo do Cruzeiro.")
 async def proximojogo_cmd(interaction: discord.Interaction):
@@ -248,6 +256,7 @@ async def palpite_cmd(interaction: discord.Interaction):
 
     await interaction.response.send_modal(PalpiteModal(JOGO_CACHE))
 
+
 @bot.tree.command(name="ranking", description="Mostra a classificação geral do Bolão do Cruzeiro.")
 async def ranking_cmd(interaction: discord.Interaction):
     ranking = carregar_dados(RANKING_FILE)
@@ -264,6 +273,7 @@ async def ranking_cmd(interaction: discord.Interaction):
         
     embed.description = texto
     await interaction.response.send_message(embed=embed)
+
 
 @tasks.loop(minutes=10)
 async def checar_jogos():

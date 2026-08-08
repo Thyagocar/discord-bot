@@ -75,11 +75,6 @@ class PainelConfigView(ui.View):
         )
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
-
-class MenuConfiguracaoView(ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
-
     # 1. Cargos de Adm
     @ui.select(cls=ui.RoleSelect, placeholder="⚙️ Selecione os cargos que podem usar comandos adm", min_values=1, max_values=5, custom_id="select_cargos_adm", row=1)
     async def select_cargos(self, interaction: discord.Interaction, select: ui.RoleSelect):
@@ -146,16 +141,7 @@ async def on_guild_join(guild):
         color=0x0033A0
     )
     
-    # Junta a view de botões e de selects numa mensagem só
-    view = discord.View(timeout=None)
-    view.add_item(PainelConfigView().children[0]) # Botão de ajuda
-    
-    # Adiciona os selects da outra view
-    config_view = MenuConfiguracaoView()
-    for item in config_view.children:
-        view.add_item(item)
-
-    await canal.send(embed=embed, view=view)
+    await canal.send(embed=embed, view=PainelConfigView())
 
 
 # ================= MODAL DE PALPITE =================
@@ -359,7 +345,6 @@ async def placarfinal_cmd(interaction: discord.Interaction, gols_mandante: int, 
         color=0x0033A0
     )
 
-    # Posta no canal de ranking configurado (se houver), ou no canal atual
     config = carregar_dados(CONFIG_FILE)
     canal_ranking_id = config.get("canal_ranking")
     

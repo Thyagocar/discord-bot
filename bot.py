@@ -21,7 +21,7 @@ CRUZEIRO_ID = 1783  # ID oficial do Cruzeiro na API
 PALPITES_FILE = "palpites.json"
 RANKING_FILE = "ranking.json"
 
-# Variável de cache para o próximo jogo (evita delay no comando)
+# Variável de cache para o próximo jogo
 JOGO_CACHE = None
 # =============================================================
 
@@ -59,8 +59,10 @@ def buscar_jogo_na_api():
 @tasks.loop(minutes=30)
 async def atualizar_cache_jogo():
     global JOGO_CACHE
-    JOGO_CACHE = buscar_jogo_na_api()
-    print("🔄 Cache do próximo jogo do Cruzeiro atualizado.")
+    novo_jogo = buscar_jogo_na_api()
+    if novo_jogo:
+        JOGO_CACHE = novo_jogo
+        print("🔄 Cache do próximo jogo do Cruzeiro atualizado automaticamente.")
 
 
 # --- PAINEL POP-UP (MODAL) DO PALPITE ---
@@ -190,6 +192,11 @@ async def on_member_join(member):
 
 @bot.tree.command(name="palpite", description="Abre o painel para dar seu palpite no próximo jogo do Cruzeiro.")
 async def palpite_cmd(interaction: discord.Interaction):
+    global JOGO_CACHE
+    # Força uma nova verificação na API ao usar o comando se o cache estiver vazio
+    if not JOGO_CACHE:
+        JOGO_CACHE = buscar_jogo_na_api()
+
     if not JOGO_CACHE:
         await interaction.response.send_message("❌ Não encontrei nenhum jogo agendado do Cruzeiro no momento.", ephemeral=True)
         return

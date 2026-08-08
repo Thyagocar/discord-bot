@@ -15,7 +15,7 @@ FOOTBALL_DATA_KEY = "ee82d989ea224f0499aef3706caa09d2"
 TOKEN_DO_BOT = os.getenv("DISCORD_TOKEN")
 
 HEADERS = {"X-Auth-Token": FOOTBALL_DATA_KEY}
-CRUZEIRO_ID = 1783  # ID oficial do Cruzeiro na API
+CRUZEIRO_ID = 1771  # ID CORRETO do Cruzeiro na API
 
 # Arquivos locais
 PALPITES_FILE = "palpites.json"
@@ -193,9 +193,8 @@ async def on_member_join(member):
 @bot.tree.command(name="palpite", description="Abre o painel para dar seu palpite no próximo jogo do Cruzeiro.")
 async def palpite_cmd(interaction: discord.Interaction):
     global JOGO_CACHE
-    # Força uma nova verificação na API ao usar o comando se o cache estiver vazio
-    if not JOGO_CACHE:
-        JOGO_CACHE = buscar_jogo_na_api()
+    # Sempre força a busca caso o cache esteja vazio ou inválido
+    JOGO_CACHE = buscar_jogo_na_api()
 
     if not JOGO_CACHE:
         await interaction.response.send_message("❌ Não encontrei nenhum jogo agendado do Cruzeiro no momento.", ephemeral=True)

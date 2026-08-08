@@ -88,7 +88,7 @@ class PainelConfigView(ui.View):
                         "🏆 **`/configranking`** — Define o canal onde o ranking será postado.\n"
                         "🔔 **`/config-notificacao`** — Define canal e cargo de avisos automáticos.\n"
                         "📌 **`/setarjogo`** — Define o próximo confronto e avisa a torcida.\n"
-                        "🔒 **`/fecharpalpites`** — Encerra as apostas do jogo atual.\n"
+                        "🔒 **`/fecharpalpites`** — Encerra as apostas do jogo atual e avisa no canal.\n"
                         "🏁 **`/placarfinal`** — Insere o placar, marcadores e gera o ranking.",
             color=0x0033A0
         )
@@ -294,10 +294,14 @@ async def setarjogo_cmd(interaction: discord.Interaction, mandante: str, visitan
     if "canal_notif" in config and "cargo_notif" in config:
         canal = interaction.guild.get_channel(int(config["canal_notif"]))
         cargo = interaction.guild.get_role(int(config["cargo_notif"]))
+        canal_cmd_id = config.get("canal_comandos")
+        
         if canal and cargo:
+            canal_mencao = f"<#{canal_cmd_id}>" if canal_cmd_id else "no canal de palpites"
             embed_aviso = discord.Embed(
                 title="📢 Novo Jogo Cadastrado no Bolão!",
-                description=f"⚽ **{mandante} x {visitante}**\n📅 **Horário:** {horario}\n🏟️ **Estádio:** {estadio}\n\nO bolão está aberto! Use `/palpite` para registrar sua aposta.",
+                description=f"⚽ **{mandante} x {visitante}**\n📅 **Horário:** {horario}\n🏟️ **Estádio:** {estadio}\n\n"
+                            f"O bolão está aberto! Vá até {canal_mencao} e use `/palpite` para registrar sua aposta.",
                 color=0x0033A0
             )
             await canal.send(content=cargo.mention, embed=embed_aviso)
@@ -321,7 +325,19 @@ async def fecharpalpites_cmd(interaction: discord.Interaction):
 
     jogo["aberto"] = False
     salvar_dados(JOGO_ATIVO_FILE, jogo)
-    await interaction.response.send_message("🔒 Palpites encerrados com sucesso para este jogo!", ephemeral=True)
+
+    config = carregar_dados(CONFIG_FILE)
+    if "canal_notif" in config:
+        canal = interaction.guild.get_channel(int(config["canal_notif"]))
+        if canal:
+            embed_fechamento = discord.Embed(
+                title="🔒 Palpites Encerrados!",
+                description=f"As apostas para o confronto **{jogo['mandante']} x {jogo['visitante']}** foram trancadas pela administração. Boa sorte a todos!",
+                color=0xCC0000
+            )
+            await canal.send(embed=embed_fechamento)
+
+    await interaction.response.send_message("🔒 Palpites encerrados com sucesso para este jogo e aviso enviado no canal de notificações!", ephemeral=True)
 
 
 @bot.tree.command(name="proximojogo", description="Mostra os detalhes do próximo jogo do Cruzeiro.")
@@ -336,14 +352,24 @@ async def proximojogo_cmd(interaction: discord.Interaction):
     if not jogo:
         return await interaction.response.send_message("❌ Nenhum jogo configurado no momento.", ephemeral=True)
 
-    status = "🟢 Aberto para Palpites" if jogo.get("aberto", True) else "🔴 Encerrado"
+    esta_aberto = jogo.get("aberto", True)
+    status_texto = "🟢 Aberto para Palpites" if esta_aberto else "🔴 Palpites encerrados"
+    
+    descricao = (
+        f"⚽ **{jogo['mandante']} x {jogo['visitante']}**\n"
+        f"📅 **Data / Horário:** {jogo['horario']}\n"
+        f"🏟️ **Local:** {jogo['estadio']}\n"
+        f"🟢 **Status:** {status_texto}\n\n"
+    )
+
+    if esta_aberto:
+        descricao += "👇 Use `/palpite` para participar!"
+    else:
+        descricao += "🔒 *As apostas para esta partida já foram encerradas.*"
+
     embed = discord.Embed(
         title="🦊 Próximo Jogo do Cruzeiro",
-        description=f"⚽ **{jogo['mandante']} x {jogo['visitante']}**\n"
-                    f"📅 **Data / Horário:** {jogo['horario']}\n"
-                    f"🏟️ **Local:** {jogo['estadio']}\n"
-                    f"status: {status}\n\n"
-                    f"👇 Use `/palpite` para participar!",
+        description=descricao,
         color=0x0033A0
     )
     await interaction.response.send_message(embed=embed)
@@ -428,8 +454,7 @@ async def placarfinal_cmd(interaction: discord.Interaction, gols_mandante: int, 
             pontos_ganhos = 1
             status_texto = "✅ Acertou Vencedor! (+1 pt)"
 
-        # Bônus de +2 pontos se acertar o marcador
-        if any(m.strip() in marc_palpite for m in marcadores_reais.lower().split(',')) and marc_palpite != "nenhum citado":
+        if any(m.strip().lower() in marc_palpite for m in marcadores_reais.lower().split(',')) and marc_palpite != "nenhum citado":
             pontos_ganhos += 2
             status_texto += " + ⚽ Acertou o Marcador (+2 pts)"
             acertou_marcador = True
@@ -494,6 +519,6 @@ async def ranking_cmd(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed)
 
 
-# Inicializa o web server para o Render e executa o bot
+# Inicializa o web server para o Render e executa el bot
 threading.Thread(target=run_web).start()
 bot.run(TOKEN_DO_BOT)

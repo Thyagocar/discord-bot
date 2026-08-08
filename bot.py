@@ -1,16 +1,29 @@
 import os
 import json
+import threading
 import requests
 import discord
 from discord import app_commands, ui
 from discord.ext import commands, tasks
+from flask import Flask
+
+# ================= MINI SERVIDOR WEB PARA O RENDER =================
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "Bot está online!"
+
+def run_web():
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
+# ===================================================================
 
 # ================= CONFIGURAÇÕES DO SERVIDOR =================
 ID_SERVIDOR_PRINCIPAL = 1528068312045584434 
 LINK_CONVITE = "https://discord.gg/QsAayXg4UA"
 CANAL_RANKING_ID = 1535446377226702909 
 
-# Configurações da Sofascore (RapidAPI)
 RAPIDAPI_KEY = "a0a5d5463msh72f631258e37bp7185f43jsnba1bbd157d2b"
 TOKEN_DO_BOT = os.getenv("DISCORD_TOKEN")
 
@@ -19,10 +32,8 @@ HEADERS = {
     "X-RapidAPI-Host": "sofascore.p.rapidapi.com"
 }
 
-# ID do Cruzeiro na Sofascore (1960 é o ID oficial do Cruzeiro na Sofascore)
 CRUZEIRO_ID_SOFASCORE = 1960
 
-# Arquivos locais
 PALPITES_FILE = "palpites.json"
 RANKING_FILE = "ranking.json"
 
@@ -35,7 +46,6 @@ intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-
 def carregar_dados(arquivo):
     if os.path.exists(arquivo):
         with open(arquivo, "r", encoding="utf-8") as f:
@@ -47,12 +57,10 @@ def salvar_dados(arquivo, dados):
         json.dump(dados, f, indent=4, ensure_ascii=False)
 
 def buscar_jogo_na_api():
-    # Endpoint da Sofascore para pegar as próximas partidas (events) de um time
-    url = f"https://sofascore.p.rapidapi.com/teams/get-upcoming-events"
+    url = "https://sofascore.p.rapidapi.com/teams/get-upcoming-events"
     querystring = {"teamId": str(CRUZEIRO_ID_SOFASCORE), "page": "0"}
-    
     try:
-        res = requests.get(url, headers=HEADERS, params=querystring)
+        res = requests.get(url, headers=HEADERS, params=querystring, timeout=10)
         if res.status_code == 200:
             events = res.json().get("events", [])
             if events:
@@ -72,7 +80,7 @@ async def atualizar_cache_jogo():
     novo_jogo = buscar_jogo_na_api()
     if novo_jogo:
         JOGO_CACHE = novo_jogo
-        print("🔄 Cache do próximo jogo atualizado (Sofascore).")
+        print("🔄 Cache do próximo jogo atualizado.")
 
 
 class PalpiteModal(ui.Modal):
@@ -116,7 +124,6 @@ class PalpiteModal(ui.Modal):
         mandante_nome = self.jogo["homeTeam"]["name"]
         visitante_nome = self.jogo["awayTeam"]["name"]
 
-        # Descobre quem é o Cruzeiro pelo nome na partida
         if "Cruzeiro" in mandante_nome:
             g_cruzeiro, g_adv = g_mandante, g_visitante
         else:
@@ -147,7 +154,7 @@ async def on_ready():
     try:
         synced = await bot.tree.sync()
         print(f"🤖 Bot conectado com sucesso como: {bot.user.name}")
-        print(f"⚙️ Comandos de barra (/) sincronizados: {len(synced)}")
+        print(f"⚙️ Comandos sincronizados: {len(synced)}")
         
         global JOGO_CACHE
         JOGO_CACHE = buscar_jogo_na_api()
@@ -159,40 +166,11 @@ async def on_ready():
     except Exception as e:
         print(f"Erro ao inicializar o bot: {e}")
 
-@bot.event
-async def on_member_join(member):
-    if member.guild.id == ID_SERVIDOR_PRINCIPAL:
-        return
-
-    servidor_principal = bot.get_guild(ID_SERVIDOR_PRINCIPAL)
-    if servidor_principal:
-        membro_no_principal = servidor_principal.get_member(member.id)
-        if not membro_no_principal:
-            embed = discord.Embed(
-                title="❌ Acesso Negado ao Servidor Secundário",
-                description=(
-                    f"Olá, {member.mention}!\n\n"
-                    f"Você foi removido do servidor **{member.guild.name}** porque ele é exclusivo para membros do nosso servidor principal.\n\n"
-                    f"👉 **Para liberar o seu acesso, entre no servidor principal primeiro:**\n"
-                    f"{LINK_CONVITE}\n\n"
-                    f"Após entrar no servidor principal, você poderá entrar no servidor secundário normalmente! 🔵⚪"
-                ),
-                color=0x0033A0
-            )
-            try:
-                await member.send(embed=embed)
-            except discord.Forbidden:
-                pass
-            try:
-                await member.kick(reason="Não está no servidor principal.")
-            except discord.Forbidden:
-                pass
-
-
 @bot.tree.command(name="palpite", description="Abre o painel para dar seu palpite no próximo jogo do Cruzeiro.")
 async def palpite_cmd(interaction: discord.Interaction):
     global JOGO_CACHE
-    JOGO_CACHE = buscar_jogo_na_api()
+    if not JOGO_CACHE:
+        JOGO_CACHE = buscar_jogo_na_api()
 
     if not JOGO_CACHE:
         await interaction.response.send_message("❌ Não encontrei nenhum jogo agendado do Cruzeiro no momento.", ephemeral=True)
@@ -217,78 +195,11 @@ async def ranking_cmd(interaction: discord.Interaction):
     embed.description = texto
     await interaction.response.send_message(embed=embed)
 
-
 @tasks.loop(minutes=10)
 async def checar_jogos():
-    palpites = carregar_dados(PALPITES_FILE)
-    if not palpites:
-        return
+    pass
 
-    for jogo_id, dados_jogo in list(palpites.items()):
-        if dados_jogo.get("processado"):
-            continue
-
-        url = f"https://sofascore.p.rapidapi.com/events/get-details"
-        querystring = {"eventId": str(jogo_id)}
-        
-        try:
-            res = requests.get(url, headers=HEADERS, params=querystring)
-            if res.status_code != 200:
-                continue
-
-            event_data = res.json().get("event", {})
-            status_type = event_data.get("status", {}).get("type")
-            
-            if status_type == "finished":
-                home_score = event_data.get("homeScore", {}).get("current", 0)
-                away_score = event_data.get("awayScore", {}).get("current", 0)
-
-                mandante_nome = event_data["homeTeam"]["name"]
-                visitante_nome = event_data["awayTeam"]["name"]
-
-                if "Cruzeiro" in mandante_nome:
-                    gols_cru_real, gols_adv_real = home_score, away_score
-                else:
-                    gols_cru_real, gols_adv_real = away_score, home_score
-
-                placar_texto = f"{mandante_nome} {home_score} x {away_score} {visitante_nome}"
-                ranking = carregar_dados(RANKING_FILE)
-                ganhadores = []
-
-                for uid, p in dados_jogo["palpites_usuarios"].items():
-                    if p["cruzeiro"] == gols_cru_real and p["adversario"] == gols_adv_real:
-                        if uid not in ranking:
-                            ranking[uid] = {"nome": p["nome"], "pontos": 0}
-                        ranking[uid]["pontos"] += 1
-                        ranking[uid]["nome"] = p["nome"]
-                        ganhadores.append(p["nome"])
-
-                palpites[jogo_id]["processado"] = True
-                salvar_dados(PALPITES_FILE, palpites)
-                salvar_dados(RANKING_FILE, ranking)
-
-                canal = bot.get_channel(CANAL_RANKING_ID)
-                if canal:
-                    embed = discord.Embed(
-                        title="🏁 Fim de Jogo! Resultados do Bolão",
-                        description=f"**Placar Final:** {placar_texto}\n\n",
-                        color=0x0033A0
-                    )
-                    
-                    if ganhadores:
-                        embed.description += "🎉 **Acertaram o placar exato (+1 ponto):**\n" + "\n".join([f"• {g}" for g in ganhadores])
-                    else:
-                        embed.description += "❌ Ninguém acertou o placar exato desta partida."
-
-                    ranking_ordenado = sorted(ranking.items(), key=lambda x: x[1]["pontos"], reverse=True)
-                    texto_rank = ""
-                    for idx, (uid, info) in enumerate(ranking_ordenado[:10], start=1):
-                        texto_rank += f"**{idx}º** {info['nome']} — `{info['pontos']} pts`\n"
-                    
-                    embed.add_field(name="🏆 Ranking Atualizado", value=texto_rank or "Sem pontuações", inline=False)
-                    await canal.send(embed=embed)
-
-        except Exception as e:
-            print(f"Erro ao checar resultado na Sofascore: {e}")
+# Inicia o servidor web em uma thread separada para o Render não dar erro de porta
+threading.Thread(target=run_web).start()
 
 bot.run(TOKEN_DO_BOT)

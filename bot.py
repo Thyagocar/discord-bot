@@ -15,17 +15,16 @@ FOOTBALL_DATA_KEY = "ee82d989ea224f0499aef3706caa09d2"
 TOKEN_DO_BOT = os.getenv("DISCORD_TOKEN")
 
 HEADERS = {"X-Auth-Token": FOOTBALL_DATA_KEY}
-CRUZEIRO_ID = 1771  # ID CORRETO do Cruzeiro na API
+# ID do Brasileirão na API (BSA) ou busca geral de partidas do Cruzeiro por nome
+NOME_TIME = "Cruzeiro"
 
 # Arquivos locais
 PALPITES_FILE = "palpites.json"
 RANKING_FILE = "ranking.json"
 
-# Variável de cache para o próximo jogo
 JOGO_CACHE = None
 # =============================================================
 
-# Configuração de Intents
 intents = discord.Intents.default()
 intents.members = True          
 intents.message_content = True  
@@ -33,7 +32,6 @@ intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 
-# --- BANCO DE DADOS LOCAL (JSON) ---
 def carregar_dados(arquivo):
     if os.path.exists(arquivo):
         with open(arquivo, "r", encoding="utf-8") as f:
@@ -45,13 +43,26 @@ def salvar_dados(arquivo, dados):
         json.dump(dados, f, indent=4, ensure_ascii=False)
 
 def buscar_jogo_na_api():
-    url = f"https://api.football-data.org/v4/teams/{CRUZEIRO_ID}/matches?status=SCHEDULED"
+    # Busca partidas agendadas da Série A do Brasileirão (BSA) onde o Cruzeiro joga
+    url = "https://api.football-data.org/v4/competitions/BSA/matches?status=SCHEDULED"
     try:
         res = requests.get(url, headers=HEADERS)
         if res.status_code == 200:
             matches = res.json().get("matches", [])
-            if matches:
-                return matches[0]
+            for match in matches:
+                home = match["homeTeam"]["name"]
+                away = match["awayTeam"]["name"]
+                if NOME_TIME in home or NOME_TIME in away:
+                    return match
+            
+            # Se não achar no Brasileirão, tenta buscar na API geral de partidas do time se houver
+            url_alternativa = f"https://api.football-data.org/v4/teams/1771/matches?status=SCHEDULED"
+            res_alt = requests.get(url_alternativa, headers=HEADERS)
+            if res_alt.status_code == 200:
+                matches_alt = res_alt.json().get("matches", [])
+                if matches_alt:
+                    return matches_alt[0]
+                    
     except Exception as e:
         print(f"Erro ao buscar jogo do Cruzeiro: {e}")
     return None
@@ -62,10 +73,9 @@ async def atualizar_cache_jogo():
     novo_jogo = buscar_jogo_na_api()
     if novo_jogo:
         JOGO_CACHE = novo_jogo
-        print("🔄 Cache do próximo jogo do Cruzeiro atualizado automaticamente.")
+        print("🔄 Cache do próximo jogo do Cruzeiro atualizado.")
 
 
-# --- PAINEL POP-UP (MODAL) DO PALPITE ---
 class PalpiteModal(ui.Modal):
     def __init__(self, jogo):
         mandante = jogo["homeTeam"]["name"]
@@ -104,7 +114,9 @@ class PalpiteModal(ui.Modal):
         user_id = str(interaction.user.id)
         user_name = interaction.user.display_name
 
-        if self.jogo["homeTeam"]["id"] == CRUZEIRO_ID:
+        mandante_nome = self.jogo["homeTeam"]["name"]
+        
+        if NOME_TIME in mandante_nome:
             g_cruzeiro, g_adv = g_mandante, g_visitante
         else:
             g_cruzeiro, g_adv = g_visitante, g_mandante
@@ -120,7 +132,6 @@ class PalpiteModal(ui.Modal):
         }
         salvar_dados(PALPITES_FILE, palpites)
 
-        mandante_nome = self.jogo["homeTeam"]["name"]
         visitante_nome = self.jogo["awayTeam"]["name"]
 
         embed = discord.Embed(
@@ -131,8 +142,6 @@ class PalpiteModal(ui.Modal):
         )
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
-
-# ================= EVENTOS DO BOT =================
 
 @bot.event
 async def on_ready():
@@ -177,23 +186,18 @@ async def on_member_join(member):
 
             try:
                 await member.send(embed=embed)
-                print(f"📩 Mensagem enviada via DM para {member.name}")
             except discord.Forbidden:
-                print(f"⚠️ Não foi possível enviar DM para {member.name} (DM fechada).")
+                pass
 
             try:
                 await member.kick(reason="Não está no servidor principal.")
-                print(f"🔨 {member.name} foi expulso do servidor secundário.")
             except discord.Forbidden:
-                print(f"🚨 ERRO: Verifique se o cargo do Bot está no topo em 'Configurações do Servidor > Cargos'.")
+                pass
 
-
-# ================= COMANDOS DE BARRA (SLASH) =================
 
 @bot.tree.command(name="palpite", description="Abre o painel para dar seu palpite no próximo jogo do Cruzeiro.")
 async def palpite_cmd(interaction: discord.Interaction):
     global JOGO_CACHE
-    # Sempre força a busca caso o cache esteja vazio ou inválido
     JOGO_CACHE = buscar_jogo_na_api()
 
     if not JOGO_CACHE:
@@ -220,8 +224,6 @@ async def ranking_cmd(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed)
 
 
-# ================= VERIFICAÇÃO AUTOMÁTICA DE RESULTADOS =================
-
 @tasks.loop(minutes=10)
 async def checar_jogos():
     palpites = carregar_dados(PALPITES_FILE)
@@ -244,7 +246,8 @@ async def checar_jogos():
                 home_goals = score["home"]
                 away_goals = score["away"]
 
-                if match_info["homeTeam"]["id"] == CRUZEIRO_ID:
+                mandante_nome = match_info["homeTeam"]["name"]
+                if NOME_TIME in mandante_nome:
                     gols_cru_real, gols_adv_real = home_goals, away_goals
                 else:
                     gols_cru_real, gols_adv_real = away_goals, home_goals

@@ -10,13 +10,17 @@ ID_SERVIDOR_PRINCIPAL = 1528068312045584434
 LINK_CONVITE = "https://discord.gg/QsAayXg4UA"
 CANAL_RANKING_ID = 1535446377226702909 
 
-# Configurações de Futebol e Bot
-FOOTBALL_DATA_KEY = "ee82d989ea224f0499aef3706caa09d2"
+# Configurações da Sofascore (RapidAPI)
+RAPIDAPI_KEY = "a0a5d5463msh72f631258e37bp7185f43jsnba1bbd157d2b"
 TOKEN_DO_BOT = os.getenv("DISCORD_TOKEN")
 
-HEADERS = {"X-Auth-Token": FOOTBALL_DATA_KEY}
-# ID do Brasileirão na API (BSA) ou busca geral de partidas do Cruzeiro por nome
-NOME_TIME = "Cruzeiro"
+HEADERS = {
+    "X-RapidAPI-Key": RAPIDAPI_KEY,
+    "X-RapidAPI-Host": "sofascore.p.rapidapi.com"
+}
+
+# ID do Cruzeiro na Sofascore (1960 é o ID oficial do Cruzeiro na Sofascore)
+CRUZEIRO_ID_SOFASCORE = 1960
 
 # Arquivos locais
 PALPITES_FILE = "palpites.json"
@@ -43,28 +47,23 @@ def salvar_dados(arquivo, dados):
         json.dump(dados, f, indent=4, ensure_ascii=False)
 
 def buscar_jogo_na_api():
-    # Busca partidas agendadas da Série A do Brasileirão (BSA) onde o Cruzeiro joga
-    url = "https://api.football-data.org/v4/competitions/BSA/matches?status=SCHEDULED"
+    # Endpoint da Sofascore para pegar as próximas partidas (events) de um time
+    url = f"https://sofascore.p.rapidapi.com/teams/get-upcoming-events"
+    querystring = {"teamId": str(CRUZEIRO_ID_SOFASCORE), "page": "0"}
+    
     try:
-        res = requests.get(url, headers=HEADERS)
+        res = requests.get(url, headers=HEADERS, params=querystring)
         if res.status_code == 200:
-            matches = res.json().get("matches", [])
-            for match in matches:
-                home = match["homeTeam"]["name"]
-                away = match["awayTeam"]["name"]
-                if NOME_TIME in home or NOME_TIME in away:
-                    return match
-            
-            # Se não achar no Brasileirão, tenta buscar na API geral de partidas do time se houver
-            url_alternativa = f"https://api.football-data.org/v4/teams/1771/matches?status=SCHEDULED"
-            res_alt = requests.get(url_alternativa, headers=HEADERS)
-            if res_alt.status_code == 200:
-                matches_alt = res_alt.json().get("matches", [])
-                if matches_alt:
-                    return matches_alt[0]
-                    
+            events = res.json().get("events", [])
+            if events:
+                evento = events[0]
+                return {
+                    "id": evento["id"],
+                    "homeTeam": {"name": evento["homeTeam"]["name"]},
+                    "awayTeam": {"name": evento["awayTeam"]["name"]}
+                }
     except Exception as e:
-        print(f"Erro ao buscar jogo do Cruzeiro: {e}")
+        print(f"Erro ao buscar jogo na Sofascore: {e}")
     return None
 
 @tasks.loop(minutes=30)
@@ -73,7 +72,7 @@ async def atualizar_cache_jogo():
     novo_jogo = buscar_jogo_na_api()
     if novo_jogo:
         JOGO_CACHE = novo_jogo
-        print("🔄 Cache do próximo jogo do Cruzeiro atualizado.")
+        print("🔄 Cache do próximo jogo atualizado (Sofascore).")
 
 
 class PalpiteModal(ui.Modal):
@@ -115,8 +114,10 @@ class PalpiteModal(ui.Modal):
         user_name = interaction.user.display_name
 
         mandante_nome = self.jogo["homeTeam"]["name"]
-        
-        if NOME_TIME in mandante_nome:
+        visitante_nome = self.jogo["awayTeam"]["name"]
+
+        # Descobre quem é o Cruzeiro pelo nome na partida
+        if "Cruzeiro" in mandante_nome:
             g_cruzeiro, g_adv = g_mandante, g_visitante
         else:
             g_cruzeiro, g_adv = g_visitante, g_mandante
@@ -131,8 +132,6 @@ class PalpiteModal(ui.Modal):
             "adversario": g_adv
         }
         salvar_dados(PALPITES_FILE, palpites)
-
-        visitante_nome = self.jogo["awayTeam"]["name"]
 
         embed = discord.Embed(
             title="🎯 Palpite Registrado!",
@@ -166,10 +165,8 @@ async def on_member_join(member):
         return
 
     servidor_principal = bot.get_guild(ID_SERVIDOR_PRINCIPAL)
-
     if servidor_principal:
         membro_no_principal = servidor_principal.get_member(member.id)
-        
         if not membro_no_principal:
             embed = discord.Embed(
                 title="❌ Acesso Negado ao Servidor Secundário",
@@ -182,13 +179,10 @@ async def on_member_join(member):
                 ),
                 color=0x0033A0
             )
-            embed.set_footer(text="Comunidade Celeste • Sistema de Proteção")
-
             try:
                 await member.send(embed=embed)
             except discord.Forbidden:
                 pass
-
             try:
                 await member.kick(reason="Não está no servidor principal.")
             except discord.Forbidden:
@@ -234,25 +228,30 @@ async def checar_jogos():
         if dados_jogo.get("processado"):
             continue
 
-        url = f"https://api.football-data.org/v4/matches/{jogo_id}"
+        url = f"https://sofascore.p.rapidapi.com/events/get-details"
+        querystring = {"eventId": str(jogo_id)}
+        
         try:
-            res = requests.get(url, headers=HEADERS)
+            res = requests.get(url, headers=HEADERS, params=querystring)
             if res.status_code != 200:
                 continue
 
-            match_info = res.json()
-            if match_info.get("status") == "FINISHED":
-                score = match_info["score"]["fullTime"]
-                home_goals = score["home"]
-                away_goals = score["away"]
+            event_data = res.json().get("event", {})
+            status_type = event_data.get("status", {}).get("type")
+            
+            if status_type == "finished":
+                home_score = event_data.get("homeScore", {}).get("current", 0)
+                away_score = event_data.get("awayScore", {}).get("current", 0)
 
-                mandante_nome = match_info["homeTeam"]["name"]
-                if NOME_TIME in mandante_nome:
-                    gols_cru_real, gols_adv_real = home_goals, away_goals
+                mandante_nome = event_data["homeTeam"]["name"]
+                visitante_nome = event_data["awayTeam"]["name"]
+
+                if "Cruzeiro" in mandante_nome:
+                    gols_cru_real, gols_adv_real = home_score, away_score
                 else:
-                    gols_cru_real, gols_adv_real = away_goals, home_goals
+                    gols_cru_real, gols_adv_real = away_score, home_score
 
-                placar_texto = f"{match_info['homeTeam']['name']} {home_goals} x {away_goals} {match_info['awayTeam']['name']}"
+                placar_texto = f"{mandante_nome} {home_score} x {away_score} {visitante_nome}"
                 ranking = carregar_dados(RANKING_FILE)
                 ganhadores = []
 
@@ -290,6 +289,6 @@ async def checar_jogos():
                     await canal.send(embed=embed)
 
         except Exception as e:
-            print(f"Erro ao processar o jogo {jogo_id}: {e}")
+            print(f"Erro ao checar resultado na Sofascore: {e}")
 
 bot.run(TOKEN_DO_BOT)

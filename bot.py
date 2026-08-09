@@ -1,5 +1,6 @@
 import os
 import json
+import threading
 import discord
 from discord import app_commands, ui
 from discord.ext import commands
@@ -11,6 +12,10 @@ app = Flask(__name__)
 @app.route('/')
 def home():
     return "Bot está online!"
+
+def run_flask():
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
 # ===================================================================
 
 TOKEN_DO_BOT = os.getenv("DISCORD_TOKEN")
@@ -23,7 +28,7 @@ ELENCO_FILE = "elenco.json"
 
 intents = discord.Intents.default()
 intents.members = True        
-intents.message_content =  True   
+intents.message_content = True   
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
@@ -46,11 +51,9 @@ def salvar_dados(arquivo, dados):
 def obter_elenco_servidor(guild_id_str):
     elenco_geral = carregar_dados(ELENCO_FILE)
     
-    # Se o servidor já tem elenco salvo, usa ele
     if guild_id_str in elenco_geral:
         return elenco_geral[guild_id_str]
     
-    # Se existe a chave "elenco_inicial" no arquivo (que você criou na Opção 1), carrega ela
     if "elenco_inicial" in elenco_geral:
         lista_inicial = elenco_geral["elenco_inicial"]
         elenco_geral[guild_id_str] = lista_inicial
@@ -76,7 +79,7 @@ def verificar_permissao_adm(interaction: discord.Interaction) -> bool:
     return False
 
 
-# ================= AUTOCOMPLETAR INTELIGENTE PARA CARGOS, CANAIS E JOGADORES =================
+# ================= AUTOCOMPLETAR INTELIGENTE =================
 
 async def autocomplete_cargos(interaction: discord.Interaction, current: str):
     return [
@@ -142,7 +145,7 @@ class PalpiteModal(ui.Modal):
 class SelectMarcador(ui.Select):
     def __init__(self, jogadores):
         options = [discord.SelectOption(label="Nenhum / Não haverá", value="Nenhum")]
-        for j in jogadores[:24]: # Limite de 25 opções do Discord
+        for j in jogadores[:24]:
             options.append(discord.SelectOption(label=j, value=j))
         
         super().__init__(placeholder="Selecione o Jogador Marcador (Gol)", min_values=1, max_values=1, options=options)
@@ -265,7 +268,6 @@ async def adicionarjogador_cmd(interaction: discord.Interaction, nome: str):
     guild_id = str(interaction.guild_id)
     elenco_geral = carregar_dados(ELENCO_FILE)
     
-    # Garante que a lista do servidor existe puxando a base se necessário
     if guild_id not in elenco_geral:
         elenco_geral[guild_id] = obter_elenco_servidor(guild_id)
 
@@ -513,6 +515,9 @@ async def ranking_cmd(interaction: discord.Interaction):
     embed.description = texto
     await interaction.response.send_message(embed=embed)
 
+
+# Inicializa o Flask em background para o Render não reclamar de porta
+threading.Thread(target=run_flask).start()
 
 if __name__ == "__main__":
     bot.run(TOKEN_DO_BOT)

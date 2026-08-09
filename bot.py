@@ -121,14 +121,18 @@ class PainelConfigView(ui.View):
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
+# ================= EVENTO DE ENTRADA NO SERVIDOR =================
+
 @bot.event
 async def on_guild_join(guild):
-    await garantir_canal_config(guild)
+    await criar_canal_config(guild)
 
-async def garantir_canal_config(guild):
+async def criar_canal_config(guild):
+    # Verifica se já existe um canal com esse nome para evitar duplicatas
     canal_existente = discord.utils.get(guild.text_channels, name="⚙️│config-bot")
     
     if not canal_existente:
+        # Configura as permissões para que apenas Admins/Bot vejam
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(read_messages=False),
             guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True, manage_channels=True)
@@ -142,7 +146,7 @@ async def garantir_canal_config(guild):
     embed = discord.Embed(
         title="🤖 Painel de Configuração do Bolão",
         description="Este canal é **privado** e visível apenas para administradores.\n\n"
-                    "Use os comandos de configuração para ajustar o bot.",
+                    "Clique no botão abaixo para ver como configurar o bot no seu servidor.",
         color=0x0033A0
     )
     

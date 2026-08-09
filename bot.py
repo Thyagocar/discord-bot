@@ -15,7 +15,7 @@ def home():
 
 def run_flask():
     port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
 # ===================================================================
 
 TOKEN_DO_BOT = os.getenv("DISCORD_TOKEN")
@@ -516,8 +516,8 @@ async def ranking_cmd(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed)
 
 
-# Inicializa o Flask em background para o Render não reclamar de porta
-threading.Thread(target=run_flask).start()
-
 if __name__ == "__main__":
+    # Inicia o servidor web Flask em segundo plano
+    threading.Thread(target=run_flask, daemon=True).start()
+    # Inicia o bot do Discord no processo principal
     bot.run(TOKEN_DO_BOT)

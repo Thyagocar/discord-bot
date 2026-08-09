@@ -1,5 +1,8 @@
 import os
 import json
+import threading
+import http.server
+import socketserver
 import discord
 from discord import app_commands, ui
 from discord.ext import commands
@@ -186,7 +189,7 @@ class PalpiteModal(ui.Modal):
         embed = discord.Embed(
             title="🎯 Palpite Registrado com Sucesso!",
             description=f"Partida: **{self.jogo['mandante']} {g_mandante} x {g_visitante} {self.jogo['visitante']}**\n"
-                        f"⚽ Gol: *{marcador_usuario}*\n🎯 Assistência: *{assistension_usuario if 'assistension_usuario' in locals() else assistencia_usuario}*",
+                        f"⚽ Gol: *{marcador_usuario}*\n🎯 Assistência: *{assistencia_usuario}*",
             color=0x0033A0
         )
         await interaction.response.send_message(embed=embed, ephemeral=True)
@@ -352,8 +355,29 @@ async def ranking_cmd(interaction: discord.Interaction):
     embed = discord.Embed(title="🏆 Ranking Geral", description=texto, color=0x0033A0)
     await interaction.response.send_message(embed=embed)
 
+# Servidor HTTP nativo leve para atender às exigências do Web Service do Render
+class SimpleHandler(http.server.SimpleHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-type", "text/plain")
+        self.end_headers()
+        self.wfile.write(b"Bot do Discord rodando com sucesso no Web Service!")
+    def log_message(self, format, *args):
+        return # Desativa os logs poluídos de requisição HTTP no console
+
+def run_web_server():
+    porta = int(os.environ.get("PORT", 10000))
+    with socketserver.TCPServer(("0.0.0.0", porta), SimpleHandler) as httpd:
+        print(f"Servidor web rodando na porta {porta}")
+        httpd.serve_forever()
+
 if __name__ == "__main__":
     if not TOKEN_DO_BOT:
         print("❌ ERRO: DISCORD_TOKEN não encontrado nas variáveis de ambiente!")
     else:
+        # Inicia o servidor web em segundo plano para o Render aceitar o Web Service
+        web_thread = threading.Thread(target=run_web_server, daemon=True)
+        web_thread.start()
+        
+        # Inicia o bot do Discord com todas as funcionalidades intactas
         bot.run(TOKEN_DO_BOT)

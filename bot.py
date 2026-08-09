@@ -375,9 +375,9 @@ if __name__ == "__main__":
     if not TOKEN_DO_BOT:
         print("❌ ERRO: DISCORD_TOKEN não encontrado nas variáveis de ambiente!")
     else:
-        # Inicia o servidor web em segundo plano para o Render aceitar o Web Service
+        # Inicia o servidor web primeiro em segundo plano para o Render reconhecer a porta imediatamente
         web_thread = threading.Thread(target=run_web_server, daemon=True)
         web_thread.start()
         
-        # Inicia o bot do Discord com todas as funcionalidades intactas
+        print("Iniciando conexão com o Discord...")
         bot.run(TOKEN_DO_BOT)

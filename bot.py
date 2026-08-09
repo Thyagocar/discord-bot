@@ -4,14 +4,14 @@ import threading
 import discord
 from discord import app_commands, ui
 from discord.ext import commands
-from flask import Flask
+from flask import Flask, jsonify
 
 # ================= MINI SERVIDOR WEB PARA O RENDER =================
 app = Flask(__name__)
 
-@app.route('/')
+@app.route('/', methods=['GET', 'HEAD'])
 def home():
-    return "Bot está online!"
+    return "Bot do Discord esta ativo e rodando!", 200
 
 def run_flask():
     port = int(os.environ.get("PORT", 10000))
@@ -517,7 +517,7 @@ async def ranking_cmd(interaction: discord.Interaction):
 
 
 if __name__ == "__main__":
-    # Inicia o servidor web Flask em segundo plano
+    # Inicia o servidor Flask em thread secundária daemon
     threading.Thread(target=run_flask, daemon=True).start()
-    # Inicia o bot do Discord no processo principal
+    # Inicia o bot no processo principal
     bot.run(TOKEN_DO_BOT)

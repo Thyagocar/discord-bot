@@ -128,11 +128,9 @@ async def on_guild_join(guild):
     await criar_canal_config(guild)
 
 async def criar_canal_config(guild):
-    # Verifica se já existe um canal com esse nome para evitar duplicatas
     canal_existente = discord.utils.get(guild.text_channels, name="⚙️│config-bot")
     
     if not canal_existente:
-        # Configura as permissões para que apenas Admins/Bot vejam
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(read_messages=False),
             guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True, manage_channels=True)
@@ -734,6 +732,9 @@ async def ranking_cmd(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed)
 
 
-# Inicializa o web server para o Render e executa o bot
-threading.Thread(target=run_web).start()
-bot.run(TOKEN_DO_BOT)
+# Inicializa o web server em background para o Render não reclamar
+threading.Thread(target=run_web, daemon=True).start()
+
+# Executa o bot do Discord de forma síncrona principal
+if __name__ == "__main__":
+    bot.run(TOKEN_DO_BOT)

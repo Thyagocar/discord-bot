@@ -111,18 +111,6 @@ class SetupSelectCargoAdm(ui.RoleSelect):
         salvar_dados(CONFIG_FILE, config_geral)
         await interaction.response.send_message(f"✅ Cargo de ADM definido para {self.values[0].mention}!", ephemeral=True)
 
-class SetupSelectCargoMarcacao(ui.RoleSelect):
-    def __init__(self):
-        super().__init__(placeholder="Selecione o Cargo a ser marcado nos avisos", min_values=1, max_values=1, row=4)
-
-    async def callback(self, interaction: discord.Interaction):
-        guild_id = str(interaction.guild_id)
-        config_geral = carregar_dados(CONFIG_FILE)
-        if guild_id not in config_geral: config_geral[guild_id] = {}
-        config_geral[guild_id]["cargo_marcacao"] = str(self.values[0].id)
-        salvar_dados(CONFIG_FILE, config_geral)
-        await interaction.response.send_message(f"✅ Cargo de marcação definido para {self.values[0].mention}!", ephemeral=True)
-
 class SetupSelectCargoTop1(ui.RoleSelect):
     def __init__(self):
         super().__init__(placeholder="Selecione o Cargo para o TOP 1 do Ranking", min_values=1, max_values=1, row=4)

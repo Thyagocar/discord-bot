@@ -1,5 +1,6 @@
 import os
 import json
+import asyncio
 import discord
 from discord import app_commands, ui
 from discord.ext import commands
@@ -226,13 +227,17 @@ async def on_guild_join(guild: discord.Guild):
         if role.permissions.administrator:
             overwrites[role] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
 
-    canal = await guild.create_text_channel("config-bot-palpites", overwrites=overwrites)
-    embed = discord.Embed(
-        title="⚙️ Painel de Configuração do Bot",
-        description="Bem-vindo! Use os menus e botões abaixo para configurar rapidamente o bot no seu servidor:",
-        color=0x0033A0
-    )
-    await canal.send(embed=embed, view=SetupView())
+    try:
+        canal = await guild.create_text_channel("config-bot-palpites", overwrites=overwrites)
+        await asyncio.sleep(1.5) # Aguarda o canal propagar na API do Discord
+        embed = discord.Embed(
+            title="⚙️ Painel de Configuração do Bot",
+            description="Bem-vindo! Use os menus e botões abaixo para configurar rapidamente o bot no seu servidor:",
+            color=0x0033A0
+        )
+        await canal.send(embed=embed, view=SetupView())
+    except Exception as e:
+        print(f"Erro ao criar canal de setup no servidor {guild.name}: {e}")
 
 @bot.tree.command(name="setup", description="[Admin] Cria o painel de configuração privado.")
 async def setup_cmd(interaction: discord.Interaction):
@@ -246,6 +251,7 @@ async def setup_cmd(interaction: discord.Interaction):
         guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True, manage_channels=True)
     }
     canal = await guild.create_text_channel("config-bot-palpites", overwrites=overwrites)
+    await asyncio.sleep(1)
     embed = discord.Embed(
         title="⚙️ Painel de Configuração do Bot",
         description="Configure abaixo as opções do bot:",
@@ -457,7 +463,6 @@ async def placarfinal_cmd(interaction: discord.Interaction, gols_mandante: int, 
     
     ranking_ordenado = sorted(ranking.items(), key=lambda x: x[1]["pontos"], reverse=True)
     
-    # Gerenciamento de Cargo do TOP 1
     config = carregar_dados(CONFIG_FILE).get(guild_id, {})
     cargo_top1_id = config.get("cargo_top1")
     if cargo_top1_id and ranking_ordenado:

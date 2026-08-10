@@ -151,8 +151,6 @@ class SetupView(ui.View):
         embed.add_field(name="/setup", value="[Admin] Recria este painel de configuração.", inline=False)
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
-# --- MODAIS DE PALPITES ---
-
 class PalpiteModal(ui.Modal):
     def __init__(self, jogo):
         mandante = jogo["mandante"]
@@ -210,6 +208,7 @@ class PalpiteModal(ui.Modal):
 
 @bot.event
 async def on_ready():
+    bot.add_view(SetupView()) # Mantém a view ativa e persistente na memória do bot
     try:
         synced = await bot.tree.sync()
         print(f"🤖 Bot conectado como: {bot.user.name}")
@@ -229,7 +228,7 @@ async def on_guild_join(guild: discord.Guild):
 
     try:
         canal = await guild.create_text_channel("config-bot-palpites", overwrites=overwrites)
-        await asyncio.sleep(1.5) # Aguarda o canal propagar na API do Discord
+        await asyncio.sleep(2)
         embed = discord.Embed(
             title="⚙️ Painel de Configuração do Bot",
             description="Bem-vindo! Use os menus e botões abaixo para configurar rapidamente o bot no seu servidor:",
@@ -237,28 +236,34 @@ async def on_guild_join(guild: discord.Guild):
         )
         await canal.send(embed=embed, view=SetupView())
     except Exception as e:
-        print(f"Erro ao criar canal de setup no servidor {guild.name}: {e}")
+        print(f"Erro ao criar canal de setup em {guild.name}: {e}")
 
 @bot.tree.command(name="setup", description="[Admin] Cria o painel de configuração privado.")
 async def setup_cmd(interaction: discord.Interaction):
     if not interaction.user.guild_permissions.administrator:
         return await interaction.response.send_message("❌ Apenas administradores.", ephemeral=True)
     
-    guild = interaction.guild
-    overwrites = {
-        guild.default_role: discord.PermissionOverwrite(read_messages=False),
-        interaction.user: discord.PermissionOverwrite(read_messages=True, send_messages=True),
-        guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True, manage_channels=True)
-    }
-    canal = await guild.create_text_channel("config-bot-palpites", overwrites=overwrites)
-    await asyncio.sleep(1)
-    embed = discord.Embed(
-        title="⚙️ Painel de Configuração do Bot",
-        description="Configure abaixo as opções do bot:",
-        color=0x0033A0
-    )
-    await canal.send(embed=embed, view=SetupView())
-    await interaction.response.send_message(f"✅ Canal de configuração criado: {canal.mention}", ephemeral=True)
+    await interaction.response.defer(ephemeral=True)
+    
+    try:
+        guild = interaction.guild
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(read_messages=False),
+            interaction.user: discord.PermissionOverwrite(read_messages=True, send_messages=True),
+            guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True, manage_channels=True)
+        }
+        canal = await guild.create_text_channel("config-bot-palpites", overwrites=overwrites)
+        await asyncio.sleep(1)
+        
+        embed = discord.Embed(
+            title="⚙️ Painel de Configuração do Bot",
+            description="Configure abaixo as opções do bot usando os seletores:",
+            color=0x0033A0
+        )
+        await canal.send(embed=embed, view=SetupView())
+        await interaction.followup.send(f"✅ Canal de configuração criado com sucesso: {canal.mention}", ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"❌ Erro ao criar canal de setup: `{e}`", ephemeral=True)
 
 @bot.tree.command(name="adicionarjogador", description="[Admin] Adiciona um jogador ao elenco.")
 async def adicionarjogador_cmd(interaction: discord.Interaction, nome: str):

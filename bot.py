@@ -194,7 +194,7 @@ async def on_ready():
     try:
         synced = await bot.tree.sync()
         print(f"🤖 Bot conectado como: {bot.user.name}")
-        print(f"⚙️ Comandos sincronizados: {len(synced)}")
+        print(f"⚙️ Comandos sincronizados globalmente: {len(synced)}")
     except Exception as e:
         print(f"Erro ao sincronizar comandos: {e}")
 

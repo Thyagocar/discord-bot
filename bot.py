@@ -112,6 +112,18 @@ class SetupSelectCargoAdm(ui.RoleSelect):
         salvar_dados(CONFIG_FILE, config_geral)
         await interaction.response.send_message(f"✅ Cargo de ADM definido para {self.values[0].mention}!", ephemeral=True)
 
+class SetupSelectCargoTop1(ui.RoleSelect):
+    def __init__(self):
+        super().__init__(placeholder="Selecione o Cargo para o TOP 1 do Ranking", min_values=1, max_values=1, row=4)
+
+    async def callback(self, interaction: discord.Interaction):
+        guild_id = str(interaction.guild_id)
+        config_geral = carregar_dados(CONFIG_FILE)
+        if guild_id not in config_geral: config_geral[guild_id] = {}
+        config_geral[guild_id]["cargo_top1"] = str(self.values[0].id)
+        salvar_dados(CONFIG_FILE, config_geral)
+        await interaction.response.send_message(f"✅ Cargo de TOP 1 definido para {self.values[0].mention}!", ephemeral=True)
+
 class SetupView(ui.View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -119,24 +131,7 @@ class SetupView(ui.View):
         self.add_item(SetupSelectCanalComandos())
         self.add_item(SetupSelectCanalAvisos())
         self.add_item(SetupSelectCargoAdm())
-
-    @ui.button(label="📖 Ver Comandos e Ajuda", style=discord.ButtonStyle.blurple, row=4)
-    async def ver_ajuda(self, interaction: discord.Interaction, button: discord.ui.Button):
-        embed = discord.Embed(
-            title="📚 Guia de Comandos do Bot",
-            description="Aqui estão todos os comandos disponíveis e para que servem:",
-            color=0x0033A0
-        )
-        embed.add_field(name="/palpite", value="Abre o painel para registrar sua aposta (gols, marcadores e assistentes).", inline=False)
-        embed.add_field(name="/proximojogo", value="Mostra as informações da partida ativa no momento.", inline=False)
-        embed.add_field(name="/ranking", value="Exibe a tabela atualizada de pontuação do servidor.", inline=False)
-        embed.add_field(name="/setarjogo", value="[Admin] Define um novo confronto e avisa no canal configurado.", inline=False)
-        embed.add_field(name="/fecharpalpite", value="[Admin] Encerra imediatamente o recebimento de palpites.", inline=False)
-        embed.add_field(name="/placarfinal", value="[Admin] Insere o placar real, pontua todo mundo, atualiza o ranking e o cargo de TOP 1.", inline=False)
-        embed.add_field(name="/adicionarjogador", value="[Admin] Adiciona um jogador ao elenco do servidor.", inline=False)
-        embed.add_field(name="/removerjogador", value="[Admin] Remove um jogador do elenco do servidor.", inline=False)
-        embed.add_field(name="/setup", value="[Admin] Recria este painel de configuração.", inline=False)
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        self.add_item(SetupSelectCargoTop1())
 
 class PalpiteModal(ui.Modal):
     def __init__(self, jogo):
@@ -218,7 +213,7 @@ async def on_guild_join(guild: discord.Guild):
         await asyncio.sleep(2)
         embed = discord.Embed(
             title="⚙️ Painel de Configuração do Bot",
-            description="Bem-vindo! Use os menus e botões abaixo para configurar rapidamente o bot no seu servidor:",
+            description="Bem-vindo! Use os menus abaixo para configurar rapidamente o bot no seu servidor:",
             color=0x0033A0
         )
         await canal.send(embed=embed, view=SetupView())

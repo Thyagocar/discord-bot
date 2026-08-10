@@ -112,18 +112,6 @@ class SetupSelectCargoAdm(ui.RoleSelect):
         salvar_dados(CONFIG_FILE, config_geral)
         await interaction.response.send_message(f"✅ Cargo de ADM definido para {self.values[0].mention}!", ephemeral=True)
 
-class SetupSelectCargoTop1(ui.RoleSelect):
-    def __init__(self):
-        super().__init__(placeholder="Selecione o Cargo para o TOP 1 do Ranking", min_values=1, max_values=1, row=4)
-
-    async def callback(self, interaction: discord.Interaction):
-        guild_id = str(interaction.guild_id)
-        config_geral = carregar_dados(CONFIG_FILE)
-        if guild_id not in config_geral: config_geral[guild_id] = {}
-        config_geral[guild_id]["cargo_top1"] = str(self.values[0].id)
-        salvar_dados(CONFIG_FILE, config_geral)
-        await interaction.response.send_message(f"✅ Cargo de TOP 1 definido para {self.values[0].mention}!", ephemeral=True)
-
 class SetupView(ui.View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -131,7 +119,6 @@ class SetupView(ui.View):
         self.add_item(SetupSelectCanalComandos())
         self.add_item(SetupSelectCanalAvisos())
         self.add_item(SetupSelectCargoAdm())
-        self.add_item(SetupSelectCargoTop1())
 
     @ui.button(label="📖 Ver Comandos e Ajuda", style=discord.ButtonStyle.blurple, row=4)
     async def ver_ajuda(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -208,7 +195,7 @@ class PalpiteModal(ui.Modal):
 
 @bot.event
 async def on_ready():
-    bot.add_view(SetupView()) # Mantém a view ativa e persistente na memória do bot
+    bot.add_view(SetupView())
     try:
         synced = await bot.tree.sync()
         print(f"🤖 Bot conectado como: {bot.user.name}")

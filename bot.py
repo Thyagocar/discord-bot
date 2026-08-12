@@ -100,9 +100,21 @@ class SetupSelectCanalAvisos(ui.ChannelSelect):
         salvar_dados(CONFIG_FILE, config_geral)
         await interaction.response.send_message(f"✅ Canal de avisos definido para {self.values[0].mention}!", ephemeral=True)
 
+class SetupSelectCargoMarcacao(ui.RoleSelect):
+    def __init__(self):
+        super().__init__(placeholder="Selecione o Cargo para marcar nos avisos", min_values=1, max_values=1, row=3)
+
+    async def callback(self, interaction: discord.Interaction):
+        guild_id = str(interaction.guild_id)
+        config_geral = carregar_dados(CONFIG_FILE)
+        if guild_id not in config_geral: config_geral[guild_id] = {}
+        config_geral[guild_id]["cargo_marcacao"] = str(self.values[0].id)
+        salvar_dados(CONFIG_FILE, config_geral)
+        await interaction.response.send_message(f"✅ Cargo para aviso de jogos definido para {self.values[0].mention}!", ephemeral=True)
+
 class SetupSelectCargoAdm(ui.RoleSelect):
     def __init__(self):
-        super().__init__(placeholder="Selecione o Cargo de ADM do Bot", min_values=1, max_values=1, row=3)
+        super().__init__(placeholder="Selecione o Cargo de ADM do Bot", min_values=1, max_values=1, row=4)
 
     async def callback(self, interaction: discord.Interaction):
         guild_id = str(interaction.guild_id)
@@ -112,26 +124,14 @@ class SetupSelectCargoAdm(ui.RoleSelect):
         salvar_dados(CONFIG_FILE, config_geral)
         await interaction.response.send_message(f"✅ Cargo de ADM definido para {self.values[0].mention}!", ephemeral=True)
 
-class SetupSelectCargoTop1(ui.RoleSelect):
-    def __init__(self):
-        super().__init__(placeholder="Selecione o Cargo para o TOP 1 do Ranking", min_values=1, max_values=1, row=4)
-
-    async def callback(self, interaction: discord.Interaction):
-        guild_id = str(interaction.guild_id)
-        config_geral = carregar_dados(CONFIG_FILE)
-        if guild_id not in config_geral: config_geral[guild_id] = {}
-        config_geral[guild_id]["cargo_top1"] = str(self.values[0].id)
-        salvar_dados(CONFIG_FILE, config_geral)
-        await interaction.response.send_message(f"✅ Cargo de TOP 1 definido para {self.values[0].mention}!", ephemeral=True)
-
 class SetupView(ui.View):
     def __init__(self):
         super().__init__(timeout=None)
         self.add_item(SetupSelectCanalRanking())
         self.add_item(SetupSelectCanalComandos())
         self.add_item(SetupSelectCanalAvisos())
+        self.add_item(SetupSelectCargoMarcacao())
         self.add_item(SetupSelectCargoAdm())
-        self.add_item(SetupSelectCargoTop1())
 
 class PalpiteModal(ui.Modal):
     def __init__(self, jogo):
@@ -378,6 +378,36 @@ async def palpite_cmd(interaction: discord.Interaction):
         return await interaction.response.send_message("❌ Os palpites para esta partida já foram encerrados!", ephemeral=True)
 
     await interaction.response.send_modal(PalpiteModal(jogo))
+
+@bot.tree.command(name="registro", description="Lista todos os palpites registrados para o jogo atual.")
+async def registro_cmd(interaction: discord.Interaction):
+    guild_id = str(interaction.guild_id)
+    
+    jogos_geral = carregar_dados(JOGO_ATIVO_FILE)
+    jogo = jogos_geral.get(guild_id)
+    if not jogo:
+        return await interaction.response.send_message("❌ Nenhum jogo ativo no momento.", ephemeral=True)
+
+    palpites_geral = carregar_dados(PALPITES_FILE)
+    palpites = palpites_geral.get(guild_id, {})
+
+    if not palpites:
+        return await interaction.response.send_message("📝 Nenhum palpite foi registrado para o jogo atual ainda.", ephemeral=True)
+
+    texto_palpites = ""
+    for uid, dados in palpites.items():
+        g_m = dados['g_mand']
+        g_v = dados['g_vis']
+        marc = dados['marcador']
+        asst = dados['assistente']
+        texto_palpites += f"👤 <@{uid}>\n└ 📊 **Placar:** `{jogo['mandante']} {g_m} x {g_v} {jogo['visitante']}`\n└ ⚽ **Marcador(es):** {marc}\n└ 👟 **Assistente(s):** {asst}\n\n"
+
+    embed = discord.Embed(
+        title=f"📋 Palpites Registrados: {jogo['mandante']} x {jogo['visitante']}",
+        description=texto_palpites,
+        color=0x0033A0
+    )
+    await interaction.response.send_message(embed=embed)
 
 @bot.tree.command(name="placarfinal", description="[Admin] Insere placar real e pontua.")
 async def placarfinal_cmd(interaction: discord.Interaction, gols_mandante: int, gols_visitante: int, marcadores_reais: str, assistentes_reais: str):

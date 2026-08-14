@@ -198,16 +198,16 @@ class PalpiteModal(ui.Modal):
 async def on_ready():
     bot.add_view(SetupView())
     print(f"🤖 Bot conectado como: {bot.user.name}")
-    print("👉 Para atualizar/registrar os comandos / no servidor, use o comando !sync no chat.")
+    print("👉 Para atualizar os comandos slash, use o comando !sync no chat do servidor.")
 
 @bot.command(name="sync")
 @commands.has_permissions(administrator=True)
 async def sync_comandos(ctx):
-    """Comando prefixado para forçar a sincronização instantânea dos comandos slash no servidor"""
+    """Comando prefixado para forçar a sincronização instantânea dos comandos no servidor"""
     msg = await ctx.send("⚙️ Sincronizando comandos slash neste servidor...")
     try:
         synced = await bot.tree.sync(guild=ctx.guild)
-        await msg.edit(content=f"✅ **{len(synced)}** comandos slash foram sincronizados com sucesso neste servidor!")
+        await msg.edit(content=f"✅ **{len(synced)}** comandos slash foram sincronizados com sucesso!")
     except Exception as e:
         await msg.edit(content=f"❌ Erro ao sincronizar: `{e}`")
 
@@ -429,7 +429,6 @@ async def placarfinal_cmd(interaction: discord.Interaction, gols_mandante: int, 
     if not verificar_permissao_adm(interaction):
         return await interaction.response.send_message("❌ Sem permissão.", ephemeral=True)
     
-    # 1. EVITA TIMEOUT: Avisa ao Discord que o bot está processando
     await interaction.response.defer()
 
     guild_id = str(interaction.guild_id)
@@ -449,8 +448,8 @@ async def placarfinal_cmd(interaction: discord.Interaction, gols_mandante: int, 
     vencedor_real = "mandante" if gols_mandante > gols_visitante else ("visitante" if gols_visitante > gols_mandante else "empate")
     apuracao_texto = ""
     
-    lista_marcadores_reais = [m.strip().lower() for m in marcadores_reais.split(',')]
-    lista_assistentes_reais = [a.strip().lower() for a in assistentes_reais.split(',')]
+    lista_marcadores_reais = [m.strip().lower() for m in marcadores_reais.split(',') if m.strip()]
+    lista_assistentes_reais = [a.strip().lower() for a in assistentes_reais.split(',') if a.strip()]
 
     for uid, dados in palpites.items():
         g_m, g_v, nome = dados["g_mand"], dados["g_vis"], dados["nome"]
@@ -462,6 +461,7 @@ async def placarfinal_cmd(interaction: discord.Interaction, gols_mandante: int, 
         pontos = 0
         acertos_detalhes = []
         
+        # Checagem de Placar e Vencedor
         if g_m == gols_mandante and g_v == gols_visitante:
             pontos += 3
             acertos_detalhes.append("🎯 Placar Exato (+3 pts)")
@@ -471,16 +471,30 @@ async def placarfinal_cmd(interaction: discord.Interaction, gols_mandante: int, 
         else:
             acertos_detalhes.append("❌ Errou Placar/Vencedor")
 
-        marcadores_usuario = [m.strip().lower() for m in marc_palpite.split(',')]
-        acertou_marcador = any(any(mr in mu for mr in lista_marcadores_reais) for mu in marcadores_usuario) if marc_palpite.lower() != "nenhum" else False
+        # Checagem de Marcador (Evita duplicação de pontuação)
+        acertou_marcador = False
+        if marc_palpite.lower() != "nenhum":
+            marcadores_usuario = [m.strip().lower() for m in marc_palpite.split(',') if m.strip()]
+            for mr in lista_marcadores_reais:
+                if any(mr in mu or mu in mr for mu in marcadores_usuario if mu):
+                    acertou_marcador = True
+                    break
+
         if acertou_marcador:
             pontos += 2
             acertos_detalhes.append("⚽ Acertou Marcador (+2 pts)")
         else:
             acertos_detalhes.append("❌ Errou Marcador")
 
-        assistentes_usuario = [a.strip().lower() for a in asst_palpite.split(',')]
-        acertou_assistente = any(any(ar in au for ar in lista_assistentes_reais) for au in assistentes_usuario) if asst_palpite.lower() != "nenhum" else False
+        # Checagem de Assistente (Evita duplicação de pontuação)
+        acertou_assistente = False
+        if asst_palpite.lower() != "nenhum":
+            assistentes_usuario = [a.strip().lower() for a in asst_palpite.split(',') if a.strip()]
+            for ar in lista_assistentes_reais:
+                if any(ar in au or au in ar for au in assistentes_usuario if au):
+                    acertou_assistente = True
+                    break
+
         if acertou_assistente:
             pontos += 1
             acertos_detalhes.append("👟 Acertou Assistente (+1 pt)")
@@ -498,7 +512,6 @@ async def placarfinal_cmd(interaction: discord.Interaction, gols_mandante: int, 
     
     ranking_ordenado = sorted(ranking.items(), key=lambda x: x[1]["pontos"], reverse=True)
     
-    # 2. PROTEÇÃO DE CARGOS: Não quebra a execução se o bot não tiver permissão
     config = carregar_dados(CONFIG_FILE).get(guild_id, {})
     cargo_top1_id = config.get("cargo_top1")
     if cargo_top1_id and ranking_ordenado:
@@ -523,7 +536,6 @@ async def placarfinal_cmd(interaction: discord.Interaction, gols_mandante: int, 
         color=0x0033A0
     )
     
-    # 3. ENVIO SEGURO DE RESPOSTA COM FOLLOWUP
     canal_ranking_id = config.get("canal_ranking")
     if canal_ranking_id:
         canal_rank = interaction.guild.get_channel(int(canal_ranking_id))

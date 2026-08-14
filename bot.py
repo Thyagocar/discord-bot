@@ -19,7 +19,7 @@ intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# --- FUNÇÕES DE AJUDA ---
+# --- FUNÇÕES DE AJUDA E PERSISTÊNCIA ---
 
 def carregar_dados(arquivo):
     if os.path.exists(arquivo):
@@ -135,6 +135,8 @@ class SetupView(ui.View):
         self.add_item(SetupSelectCargoMarcacao())
         self.add_item(SetupSelectCargoAdm())
 
+# --- MODAL DE PALPITES ---
+
 class PalpiteModal(ui.Modal):
     def __init__(self, jogo):
         mandante = jogo["mandante"]
@@ -196,12 +198,12 @@ class PalpiteModal(ui.Modal):
 async def on_ready():
     bot.add_view(SetupView())
     print(f"🤖 Bot conectado como: {bot.user.name}")
-    print("👉 Para registrar os comandos / rápido no seu servidor, digite !sync no chat.")
+    print("👉 Para atualizar/registrar os comandos / no servidor, use o comando !sync no chat.")
 
 @bot.command(name="sync")
 @commands.has_permissions(administrator=True)
 async def sync_comandos(ctx):
-    """Comando prefixado (!sync) para força a atualização dos slash commands no servidor atual"""
+    """Comando prefixado para forçar a sincronização instantânea dos comandos slash no servidor"""
     msg = await ctx.send("⚙️ Sincronizando comandos slash neste servidor...")
     try:
         synced = await bot.tree.sync(guild=ctx.guild)
@@ -427,14 +429,14 @@ async def placarfinal_cmd(interaction: discord.Interaction, gols_mandante: int, 
     if not verificar_permissao_adm(interaction):
         return await interaction.response.send_message("❌ Sem permissão.", ephemeral=True)
     
-    # Adicionado Ddefer para dar tempo extra e evitar erro de timeout no Discord (O aplicativo não respondeu)
-    await interaction.response.defer(ephemeral=True)
+    # 1. EVITA TIMEOUT: Avisa ao Discord que o bot está processando
+    await interaction.response.defer()
 
     guild_id = str(interaction.guild_id)
     jogos_geral = carregar_dados(JOGO_ATIVO_FILE)
     jogo = jogos_geral.get(guild_id)
     if not jogo:
-        return await interaction.followup.send("❌ Nenhum jogo ativo.", ephemeral=True)
+        return await interaction.followup.send("❌ Nenhum jogo ativo.")
     
     palpites_geral = carregar_dados(PALPITES_FILE)
     palpites = palpites_geral.get(guild_id, {})
@@ -496,19 +498,22 @@ async def placarfinal_cmd(interaction: discord.Interaction, gols_mandante: int, 
     
     ranking_ordenado = sorted(ranking.items(), key=lambda x: x[1]["pontos"], reverse=True)
     
-    # Otimização na remoção/adição do cargo do Top 1
+    # 2. PROTEÇÃO DE CARGOS: Não quebra a execução se o bot não tiver permissão
     config = carregar_dados(CONFIG_FILE).get(guild_id, {})
     cargo_top1_id = config.get("cargo_top1")
     if cargo_top1_id and ranking_ordenado:
         top1_uid = int(ranking_ordenado[0][0])
         cargo_top1 = interaction.guild.get_role(int(cargo_top1_id))
         if cargo_top1:
-            for member in cargo_top1.members:
-                if member.id != top1_uid:
-                    await member.remove_roles(cargo_top1)
-            top_member = interaction.guild.get_member(top1_uid)
-            if top_member and cargo_top1 not in top_member.roles:
-                await top_member.add_roles(cargo_top1)
+            try:
+                for member in cargo_top1.members:
+                    if member.id != top1_uid:
+                        await member.remove_roles(cargo_top1)
+                top_member = interaction.guild.get_member(top1_uid)
+                if top_member and cargo_top1 not in top_member.roles:
+                    await top_member.add_roles(cargo_top1)
+            except Exception as err:
+                print(f"⚠️ Erro ao atribuir cargo do Top 1: {err}")
 
     texto_ranking = "".join([f"**{i}º** {inf['nome']} (`{inf['pontos']} pts`)\n" for i, (u, inf) in enumerate(ranking_ordenado, 1)])
     
@@ -518,16 +523,17 @@ async def placarfinal_cmd(interaction: discord.Interaction, gols_mandante: int, 
         color=0x0033A0
     )
     
+    # 3. ENVIO SEGURO DE RESPOSTA COM FOLLOWUP
     canal_ranking_id = config.get("canal_ranking")
     if canal_ranking_id:
         canal_rank = interaction.guild.get_channel(int(canal_ranking_id))
         if canal_rank:
             await canal_rank.send(embed=embed)
-            await interaction.followup.send("✅ Placar computado e enviado para o canal de ranking!", ephemeral=True)
+            await interaction.followup.send("✅ Placar computado e enviado para o canal de ranking!")
         else:
-            await interaction.followup.send(embed=embed, ephemeral=True)
+            await interaction.followup.send(embed=embed)
     else:
-        await interaction.followup.send(embed=embed, ephemeral=True)
+        await interaction.followup.send(embed=embed)
 
     if guild_id in jogos_geral:
         del jogos_geral[guild_id]

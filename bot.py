@@ -19,6 +19,8 @@ intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
+# --- FUNÇÕES DE AJUDA ---
+
 def carregar_dados(arquivo):
     if os.path.exists(arquivo):
         with open(arquivo, "r", encoding="utf-8") as f:
@@ -188,15 +190,24 @@ class PalpiteModal(ui.Modal):
         )
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
+# --- EVENTOS DO BOT ---
+
 @bot.event
 async def on_ready():
     bot.add_view(SetupView())
+    print(f"🤖 Bot conectado como: {bot.user.name}")
+    print("👉 Para registrar os comandos / rápido no seu servidor, digite !sync no chat.")
+
+@bot.command(name="sync")
+@commands.has_permissions(administrator=True)
+async def sync_comandos(ctx):
+    """Comando prefixado (!sync) para força a atualização dos slash commands no servidor atual"""
+    msg = await ctx.send("⚙️ Sincronizando comandos slash neste servidor...")
     try:
-        synced = await bot.tree.sync()
-        print(f"🤖 Bot conectado como: {bot.user.name}")
-        print(f"⚙️ Comandos sincronizados globalmente: {len(synced)}")
+        synced = await bot.tree.sync(guild=ctx.guild)
+        await msg.edit(content=f"✅ **{len(synced)}** comandos slash foram sincronizados com sucesso neste servidor!")
     except Exception as e:
-        print(f"Erro ao sincronizar comandos: {e}")
+        await msg.edit(content=f"❌ Erro ao sincronizar: `{e}`")
 
 @bot.event
 async def on_guild_join(guild: discord.Guild):
@@ -219,6 +230,8 @@ async def on_guild_join(guild: discord.Guild):
         await canal.send(embed=embed, view=SetupView())
     except Exception as e:
         print(f"Erro ao criar canal de setup em {guild.name}: {e}")
+
+# --- COMANDOS SLASH ---
 
 @bot.tree.command(name="setup", description="[Admin] Cria o painel de configuração privado.")
 async def setup_cmd(interaction: discord.Interaction):
@@ -414,11 +427,14 @@ async def placarfinal_cmd(interaction: discord.Interaction, gols_mandante: int, 
     if not verificar_permissao_adm(interaction):
         return await interaction.response.send_message("❌ Sem permissão.", ephemeral=True)
     
+    # Adicionado Ddefer para dar tempo extra e evitar erro de timeout no Discord (O aplicativo não respondeu)
+    await interaction.response.defer(ephemeral=True)
+
     guild_id = str(interaction.guild_id)
     jogos_geral = carregar_dados(JOGO_ATIVO_FILE)
     jogo = jogos_geral.get(guild_id)
     if not jogo:
-        return await interaction.response.send_message("❌ Nenhum jogo ativo.", ephemeral=True)
+        return await interaction.followup.send("❌ Nenhum jogo ativo.", ephemeral=True)
     
     palpites_geral = carregar_dados(PALPITES_FILE)
     palpites = palpites_geral.get(guild_id, {})
@@ -480,19 +496,19 @@ async def placarfinal_cmd(interaction: discord.Interaction, gols_mandante: int, 
     
     ranking_ordenado = sorted(ranking.items(), key=lambda x: x[1]["pontos"], reverse=True)
     
+    # Otimização na remoção/adição do cargo do Top 1
     config = carregar_dados(CONFIG_FILE).get(guild_id, {})
     cargo_top1_id = config.get("cargo_top1")
     if cargo_top1_id and ranking_ordenado:
-        top1_uid = ranking_ordenado[0][0]
+        top1_uid = int(ranking_ordenado[0][0])
         cargo_top1 = interaction.guild.get_role(int(cargo_top1_id))
         if cargo_top1:
-            for member in interaction.guild.members:
-                if str(member.id) == top1_uid:
-                    if cargo_top1 not in member.roles:
-                        await member.add_roles(cargo_top1)
-                else:
-                    if cargo_top1 in member.roles:
-                        await member.remove_roles(cargo_top1)
+            for member in cargo_top1.members:
+                if member.id != top1_uid:
+                    await member.remove_roles(cargo_top1)
+            top_member = interaction.guild.get_member(top1_uid)
+            if top_member and cargo_top1 not in top_member.roles:
+                await top_member.add_roles(cargo_top1)
 
     texto_ranking = "".join([f"**{i}º** {inf['nome']} (`{inf['pontos']} pts`)\n" for i, (u, inf) in enumerate(ranking_ordenado, 1)])
     
@@ -507,11 +523,11 @@ async def placarfinal_cmd(interaction: discord.Interaction, gols_mandante: int, 
         canal_rank = interaction.guild.get_channel(int(canal_ranking_id))
         if canal_rank:
             await canal_rank.send(embed=embed)
-            await interaction.response.send_message("✅ Placar computado e enviado para o canal de ranking!", ephemeral=True)
+            await interaction.followup.send("✅ Placar computado e enviado para o canal de ranking!", ephemeral=True)
         else:
-            await interaction.response.send_message(embed=embed)
+            await interaction.followup.send(embed=embed, ephemeral=True)
     else:
-        await interaction.response.send_message(embed=embed)
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
     if guild_id in jogos_geral:
         del jogos_geral[guild_id]

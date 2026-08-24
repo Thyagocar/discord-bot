@@ -241,7 +241,7 @@ class PalpiteModal(ui.Modal):
         )
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
-# --- EVENTOS DO BOT ---
+# --- EVENTOS E SINCRONIZAÇÃO DO BOT ---
 
 @bot.event
 async def on_ready():
@@ -252,10 +252,13 @@ async def on_ready():
 @bot.command(name="sync")
 @commands.has_permissions(administrator=True)
 async def sync_comandos(ctx):
-    msg = await ctx.send("⚙️ Sincronizando comandos slash neste servidor...")
+    msg = await ctx.send("⚙️ Copiando comandos globais para este servidor e sincronizando...")
     try:
+        # Copia a árvore de comandos globais para o servidor atual
+        bot.tree.copy_global_to(guild=ctx.guild)
+        # Sincroniza instantaneamente neste servidor
         synced = await bot.tree.sync(guild=ctx.guild)
-        await msg.edit(content=f"✅ **{len(synced)}** comandos slash foram sincronizados com sucesso!")
+        await msg.edit(content=f"✅ **{len(synced)}** comandos slash foram sincronizados com sucesso neste servidor!")
     except Exception as e:
         await msg.edit(content=f"❌ Erro ao sincronizar: `{e}`")
 

@@ -47,7 +47,7 @@ async def salvar_dados_async(arquivo, dados):
     async with file_lock:
         await asyncio.to_thread(salvar_dados, arquivo, dados)
 
-# --- FUNÇÕES DE SUPORTE ---
+# --- FUNÇÕES DE SUPORTE E MIGRAÇÃO ---
 
 def verificar_permissao_adm(interaction: discord.Interaction) -> bool:
     if interaction.user.guild_permissions.administrator:
@@ -59,6 +59,41 @@ def verificar_permissao_adm(interaction: discord.Interaction) -> bool:
         if str(role.id) in cargos_permitidos:
             return True
     return False
+
+async def migrar_historico_antigo(guild_id: str):
+    """Garante que usuários que já têm pontos no ranking antigo apareçam no histórico."""
+    ranking_geral = await carregar_dados_async(RANKING_FILE)
+    ranking = ranking_geral.get(guild_id, {})
+    if not ranking:
+        return
+
+    historico_geral = await carregar_dados_async(HISTORICO_FILE)
+    historico = historico_geral.get(guild_id, [])
+
+    # Se já existir histórico, não precisa criar partida fictícia
+    if len(historico) > 0:
+        return
+
+    # Se não houver histórico, cria um registro das pontuações anteriores acumuladas
+    palpites_migrados = {}
+    for uid, info in ranking.items():
+        pts = info.get("pontos", 0)
+        if pts > 0:
+            palpites_migrados[uid] = {
+                "g_mand": "-",
+                "g_vis": "-",
+                "pontos_ganhos": pts,
+                "detalhes": ["🏆 Pontos acumulados de jogos anteriores"]
+            }
+
+    if palpites_migrados:
+        partida_saldo = {
+            "partida": "Jogos Anteriores (Histórico Migrado)",
+            "placar_real": "N/A",
+            "palpites": palpites_migrados
+        }
+        historico_geral[guild_id] = [partida_saldo]
+        await salvar_dados_async(HISTORICO_FILE, historico_geral)
 
 # --- PAINEL E MENUS DE CONFIGURAÇÃO ---
 
@@ -154,7 +189,7 @@ class SetupView(ui.View):
         self.add_item(SetupSelectCargoMarcacao())
         self.add_item(SetupSelectCargoAdm())
 
-# --- MODAL DE PALPITES (SUPORTA REGISTRO E EDIÇÃO) ---
+# --- MODAL DE PALPITES ---
 
 class PalpiteModal(ui.Modal):
     def __init__(self, jogo, palpite_existente=None):
@@ -170,7 +205,7 @@ class PalpiteModal(ui.Modal):
 
         self.gols_mandante = ui.TextInput(label=f"Gols do {mandante}", default=g_m_default, placeholder="Ex: 2", min_length=1, max_length=2, required=True)
         self.gols_visitante = ui.TextInput(label=f"Gols do {visitante}", default=g_v_default, placeholder="Ex: 1", min_length=1, max_length=2, required=True)
-        self.marcadores = ui.TextInput(label="Marcador(es) do Gol", default=marc_default, placeholder="Ex: Jogador A, Jogador B (ou Nenhum)", required=True)
+        self.marcadores = ui.TextInput(label="Marcador(es) do Gol", default=marc_default, placeholder="Ex: Jogador A (ou Nenhum)", required=True)
         self.assistentes = ui.TextInput(label="Assistente(s) do Gol", default=asst_default, placeholder="Ex: Jogador C (ou Nenhum)", required=True)
         
         self.add_item(self.gols_mandante)
@@ -216,22 +251,26 @@ class PalpiteModal(ui.Modal):
         )
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
-# --- EVENTOS DO BOT ---
+# --- EVENTOS E SINCRONIZAÇÃO LIMPA ---
 
 @bot.event
 async def on_ready():
     bot.add_view(SetupView())
     print(f"🤖 Bot conectado como: {bot.user.name}")
-    print("👉 Para atualizar os comandos slash, use o comando !sync no chat do servidor.")
+    print("👉 Use !sync no chat para LIMPAR a lista antiga e sincronizar os comandos corretamente.")
 
 @bot.command(name="sync")
 @commands.has_permissions(administrator=True)
 async def sync_comandos(ctx):
-    msg = await ctx.send("⚙️ Copiando comandos globais para este servidor e sincronizando...")
+    msg = await ctx.send("🧹 Limpando lista de comandos duplicados e ressincronizando...")
     try:
-        bot.tree.copy_global_to(guild=ctx.guild)
-        synced = await bot.tree.sync(guild=ctx.guild)
-        await msg.edit(content=f"✅ **{len(synced)}** comandos slash foram sincronizados com sucesso neste servidor!")
+        # 1. Limpa comandos específicos salvos anteriormente na guilda
+        bot.tree.clear_commands(guild=ctx.guild)
+        await bot.tree.sync(guild=ctx.guild)
+        
+        # 2. Sincroniza apenas globalmente para evitar duplicação no menu /
+        synced = await bot.tree.sync()
+        await msg.edit(content=f"✅ Sucesso! **{len(synced)}** comandos slash atualizados e limpos globalmente.\n*(Nota: O Discord pode levar alguns minutos para atualizar a interface do usuário no seu aplicativo)*.")
     except Exception as e:
         await msg.edit(content=f"❌ Erro ao sincronizar: `{e}`")
 
@@ -414,6 +453,9 @@ async def meuspalpites_cmd(interaction: discord.Interaction):
     guild_id = str(interaction.guild_id)
     user_id = str(interaction.user.id)
 
+    # Migra saldo do ranking antigo se ainda não existir histórico
+    await migrar_historico_antigo(guild_id)
+
     historico_geral = await carregar_dados_async(HISTORICO_FILE)
     historico_servidor = historico_geral.get(guild_id, [])
 
@@ -436,22 +478,24 @@ async def meuspalpites_cmd(interaction: discord.Interaction):
                 vencedor_cnt += 1
 
             if len(palpites_usuario) < 5:
+                placar = p.get('g_mand', '-')
+                placar_vis = p.get('g_vis', '-')
                 palpites_usuario.append(
                     f"• **{partida['partida']}** (`{partida['placar_real']}`)\n"
-                    f"  Palpite: `{p['g_mand']}x{p['g_vis']}` | **+{pts} pts**"
+                    f"  Palpite: `{placar}x{placar_vis}` | **+{pts} pts**"
                 )
 
     if jogos_participados == 0:
-        return await interaction.followup.send("❌ Você ainda não possui nenhum palpite finalizado no histórico deste servidor.", ephemeral=True)
+        return await interaction.followup.send("❌ Você ainda não possui nenhum palpite no histórico deste servidor.", ephemeral=True)
 
-    taxa_vencedor = (vencedor_cnt / jogos_participados) * 100
-    taxa_placar = (placar_exato_cnt / jogos_participados) * 100
+    taxa_vencedor = (vencedor_cnt / jogos_participados) * 100 if jogos_participados > 0 else 0
+    taxa_placar = (placar_exato_cnt / jogos_participados) * 100 if jogos_participados > 0 else 0
 
     embed = discord.Embed(
         title=f"📊 Retrospecto de {interaction.user.display_name}",
         color=0x0033A0
     )
-    embed.add_field(name="📈 Estatísticas Gerais", value=f"• Jogos Participados: **{jogos_participados}**\n• Pontuação Total: **{total_pontos} pts**\n• Média de Pts/Jogo: **{total_pontos/jogos_participados:.1f}**", inline=False)
+    embed.add_field(name="📈 Estatísticas Gerais", value=f"• Jogos Registrados: **{jogos_participados}**\n• Pontuação Total: **{total_pontos} pts**\n• Média de Pts/Jogo: **{total_pontos/jogos_participados:.1f}**", inline=False)
     embed.add_field(name="🎯 Taxas de Acerto", value=f"• Placar Exato: **{taxa_placar:.1f}%** ({placar_exato_cnt})\n• Vencedor/Empate: **{taxa_vencedor:.1f}%** ({vencedor_cnt})", inline=False)
     
     texto_historico = "\n".join(palpites_usuario) if palpites_usuario else "Nenhum histórico disponível."
@@ -465,6 +509,9 @@ async def registro_cmd(interaction: discord.Interaction):
 
     guild_id = str(interaction.guild_id)
 
+    # Garantir migração de saldo antigo
+    await migrar_historico_antigo(guild_id)
+
     jogos_geral = await carregar_dados_async(JOGO_ATIVO_FILE)
     palpites_geral = await carregar_dados_async(PALPITES_FILE)
 
@@ -474,13 +521,21 @@ async def registro_cmd(interaction: discord.Interaction):
 
     historico_geral = await carregar_dados_async(HISTORICO_FILE)
     historico_servidor = historico_geral.get(guild_id, [])
+    ranking_geral = await carregar_dados_async(RANKING_FILE)
+    ranking = ranking_geral.get(guild_id, {})
 
     total_partidas_registradas = len(historico_servidor)
     contagem_usuarios = {}
 
+    # Soma contagem a partir do histórico
     for partida in historico_servidor:
         for uid in partida.get("palpites", {}).keys():
             contagem_usuarios[uid] = contagem_usuarios.get(uid, 0) + 1
+
+    # Inclui quem está no ranking caso tenha saldo antigo
+    for uid in ranking.keys():
+        if uid not in contagem_usuarios:
+            contagem_usuarios[uid] = 1
 
     usuarios_ordenados = sorted(contagem_usuarios.items(), key=lambda x: x[1], reverse=True)[:10]
     
@@ -500,7 +555,7 @@ async def registro_cmd(interaction: discord.Interaction):
     embed.add_field(name="⚽ Partida Atual", value=info_jogo, inline=False)
     embed.add_field(name="📈 Histórico do Servidor", value=f"• Total de Partidas Finalizadas: **{total_partidas_registradas}**", inline=False)
     embed.add_field(name="🏆 Frequência de Palpites (Top 10)", value=texto_usuarios, inline=False)
-    embed.set_footer(text=f"Total de participantes únicos: {len(contagem_usuarios)}")
+    embed.set_footer(text=f"Total de participantes registrados: {len(contagem_usuarios)}")
 
     await interaction.followup.send(embed=embed)
 

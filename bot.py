@@ -11,9 +11,8 @@ CONFIG_FILE = "config.json"
 PALPITES_FILE = "palpites.json"
 RANKING_FILE = "ranking.json"
 JOGO_ATIVO_FILE = "jogo_ativo.json"
-ELENCO_FILE = "elenco.json"
+HISTORICO_FILE = "historico_palpites.json"
 
-# Lock assíncrono para garantir a integridade dos arquivos JSON
 file_lock = asyncio.Lock()
 
 intents = discord.Intents.default()
@@ -22,7 +21,7 @@ intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# --- FUNÇÕES DE PERSISTÊNCIA (COM SUPORTE ASYNC) ---
+# --- FUNÇÕES DE PERSISTÊNCIA ---
 
 def carregar_dados(arquivo):
     if os.path.exists(arquivo):
@@ -50,17 +49,6 @@ async def salvar_dados_async(arquivo, dados):
 
 # --- FUNÇÕES DE SUPORTE ---
 
-def obter_elenco_servidor(guild_id_str):
-    elenco_geral = carregar_dados(ELENCO_FILE)
-    if guild_id_str in elenco_geral:
-        return elenco_geral[guild_id_str]
-    if "elenco_inicial" in elenco_geral:
-        lista_inicial = elenco_geral["elenco_inicial"]
-        elenco_geral[guild_id_str] = lista_inicial
-        salvar_dados(ELENCO_FILE, elenco_geral)
-        return lista_inicial
-    return []
-
 def verificar_permissao_adm(interaction: discord.Interaction) -> bool:
     if interaction.user.guild_permissions.administrator:
         return True
@@ -72,15 +60,7 @@ def verificar_permissao_adm(interaction: discord.Interaction) -> bool:
             return True
     return False
 
-async def autocomplete_jogadores(interaction: discord.Interaction, current: str):
-    guild_id = str(interaction.guild_id)
-    jogadores = obter_elenco_servidor(guild_id)
-    return [
-        app_commands.Choice(name=jogador, value=jogador)
-        for jogador in jogadores if current.lower() in jogador.lower()
-    ][:25]
-
-# --- PAINEL E MENUS DE CONFIGURAÇÃO (CORRIGIDOS COM CUSTOM_ID) ---
+# --- PAINEL E MENUS DE CONFIGURAÇÃO ---
 
 class SetupSelectCanalRanking(ui.ChannelSelect):
     def __init__(self):
@@ -88,9 +68,7 @@ class SetupSelectCanalRanking(ui.ChannelSelect):
             custom_id="setup_select_canal_ranking",
             placeholder="Selecione o canal do Ranking", 
             channel_types=[discord.ChannelType.text], 
-            min_values=1, 
-            max_values=1, 
-            row=0
+            min_values=1, max_values=1, row=0
         )
 
     async def callback(self, interaction: discord.Interaction):
@@ -107,9 +85,7 @@ class SetupSelectCanalComandos(ui.ChannelSelect):
             custom_id="setup_select_canal_comandos",
             placeholder="Selecione o canal para /palpite", 
             channel_types=[discord.ChannelType.text], 
-            min_values=1, 
-            max_values=1, 
-            row=1
+            min_values=1, max_values=1, row=1
         )
 
     async def callback(self, interaction: discord.Interaction):
@@ -126,9 +102,7 @@ class SetupSelectCanalAvisos(ui.ChannelSelect):
             custom_id="setup_select_canal_avisos",
             placeholder="Selecione o canal de Avisos de Jogos", 
             channel_types=[discord.ChannelType.text], 
-            min_values=1, 
-            max_values=1, 
-            row=2
+            min_values=1, max_values=1, row=2
         )
 
     async def callback(self, interaction: discord.Interaction):
@@ -144,9 +118,7 @@ class SetupSelectCargoMarcacao(ui.RoleSelect):
         super().__init__(
             custom_id="setup_select_cargo_marcacao",
             placeholder="Selecione o Cargo para marcar nos avisos", 
-            min_values=1, 
-            max_values=1, 
-            row=3
+            min_values=1, max_values=1, row=3
         )
 
     async def callback(self, interaction: discord.Interaction):
@@ -162,9 +134,7 @@ class SetupSelectCargoAdm(ui.RoleSelect):
         super().__init__(
             custom_id="setup_select_cargo_adm",
             placeholder="Selecione o Cargo de ADM do Bot", 
-            min_values=1, 
-            max_values=1, 
-            row=4
+            min_values=1, max_values=1, row=4
         )
 
     async def callback(self, interaction: discord.Interaction):
@@ -184,18 +154,24 @@ class SetupView(ui.View):
         self.add_item(SetupSelectCargoMarcacao())
         self.add_item(SetupSelectCargoAdm())
 
-# --- MODAL DE PALPITES ---
+# --- MODAL DE PALPITES (SUPORTA REGISTRO E EDIÇÃO) ---
 
 class PalpiteModal(ui.Modal):
-    def __init__(self, jogo):
+    def __init__(self, jogo, palpite_existente=None):
         mandante = jogo["mandante"]
         visitante = jogo["visitante"]
         super().__init__(title=f"Palpite: {mandante} x {visitante}")
         self.jogo = jogo
-        self.gols_mandante = ui.TextInput(label=f"Gols do {mandante}", placeholder="Ex: 2", min_length=1, max_length=2, required=True)
-        self.gols_visitante = ui.TextInput(label=f"Gols do {visitante}", placeholder="Ex: 1", min_length=1, max_length=2, required=True)
-        self.marcadores = ui.TextInput(label="Marcador(es) do Gol", placeholder="Ex: Jogador A, Jogador B (ou Nenhum)", required=True)
-        self.assistentes = ui.TextInput(label="Assistente(s) do Gol", placeholder="Ex: Jogador C (ou Nenhum)", required=True)
+
+        g_m_default = str(palpite_existente["g_mand"]) if palpite_existente else ""
+        g_v_default = str(palpite_existente["g_vis"]) if palpite_existente else ""
+        marc_default = palpite_existente["marcador"] if palpite_existente else ""
+        asst_default = palpite_existente["assistente"] if palpite_existente else ""
+
+        self.gols_mandante = ui.TextInput(label=f"Gols do {mandante}", default=g_m_default, placeholder="Ex: 2", min_length=1, max_length=2, required=True)
+        self.gols_visitante = ui.TextInput(label=f"Gols do {visitante}", default=g_v_default, placeholder="Ex: 1", min_length=1, max_length=2, required=True)
+        self.marcadores = ui.TextInput(label="Marcador(es) do Gol", default=marc_default, placeholder="Ex: Jogador A, Jogador B (ou Nenhum)", required=True)
+        self.assistentes = ui.TextInput(label="Assistente(s) do Gol", default=asst_default, placeholder="Ex: Jogador C (ou Nenhum)", required=True)
         
         self.add_item(self.gols_mandante)
         self.add_item(self.gols_visitante)
@@ -220,12 +196,9 @@ class PalpiteModal(ui.Modal):
         if guild_id not in palpites_geral:
             palpites_geral[guild_id] = {}
         
-        palpites_servidor = palpites_geral[guild_id]
-        if user_id in palpites_servidor:
-            await interaction.response.send_message("❌ Você já enviou seu palpite para este jogo!", ephemeral=True)
-            return
+        editando = user_id in palpites_geral[guild_id]
 
-        palpites_servidor[user_id] = {
+        palpites_geral[guild_id][user_id] = {
             "nome": user_name,
             "g_mand": g_mand,
             "g_vis": g_vis,
@@ -234,14 +207,16 @@ class PalpiteModal(ui.Modal):
         }
         await salvar_dados_async(PALPITES_FILE, palpites_geral)
 
+        status_msg = "✏️ Palpite Atualizado com Sucesso!" if editando else "🎯 Palpite Registrado com Sucesso!"
+
         embed = discord.Embed(
-            title="🎯 Palpite Registrado com Sucesso!", 
+            title=status_msg, 
             description=f"Partida: **{self.jogo['mandante']} {g_mand} x {g_vis} {self.jogo['visitante']}**\n⚽ **Marcador(es):** {marc}\n👟 **Assistente(s):** {asst}", 
             color=0x0033A0
         )
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
-# --- EVENTOS E SINCRONIZAÇÃO DO BOT ---
+# --- EVENTOS DO BOT ---
 
 @bot.event
 async def on_ready():
@@ -254,9 +229,7 @@ async def on_ready():
 async def sync_comandos(ctx):
     msg = await ctx.send("⚙️ Copiando comandos globais para este servidor e sincronizando...")
     try:
-        # Copia a árvore de comandos globais para o servidor atual
         bot.tree.copy_global_to(guild=ctx.guild)
-        # Sincroniza instantaneamente neste servidor
         synced = await bot.tree.sync(guild=ctx.guild)
         await msg.edit(content=f"✅ **{len(synced)}** comandos slash foram sincronizados com sucesso neste servidor!")
     except Exception as e:
@@ -292,7 +265,6 @@ async def setup_cmd(interaction: discord.Interaction):
         return await interaction.response.send_message("❌ Apenas administradores.", ephemeral=True)
     
     await interaction.response.defer(ephemeral=True)
-    
     try:
         guild = interaction.guild
         overwrites = {
@@ -302,47 +274,15 @@ async def setup_cmd(interaction: discord.Interaction):
         }
         canal = await guild.create_text_channel("config-bot-palpites", overwrites=overwrites)
         await asyncio.sleep(1)
-        
         embed = discord.Embed(
             title="⚙️ Painel de Configuração do Bot",
             description="Configure abaixo as opções do bot usando os seletores:",
             color=0x0033A0
         )
         await canal.send(embed=embed, view=SetupView())
-        await interaction.followup.send(f"✅ Canal de configuração criado com sucesso: {canal.mention}", ephemeral=True)
+        await interaction.followup.send(f"✅ Canal de configuração criado: {canal.mention}", ephemeral=True)
     except Exception as e:
         await interaction.followup.send(f"❌ Erro ao criar canal de setup: `{e}`", ephemeral=True)
-
-@bot.tree.command(name="adicionarjogador", description="[Admin] Adiciona um jogador ao elenco.")
-async def adicionarjogador_cmd(interaction: discord.Interaction, nome: str):
-    if not verificar_permissao_adm(interaction):
-        return await interaction.response.send_message("❌ Sem permissão.", ephemeral=True)
-    guild_id = str(interaction.guild_id)
-    elenco_geral = await carregar_dados_async(ELENCO_FILE)
-    if guild_id not in elenco_geral:
-        elenco_geral[guild_id] = obter_elenco_servidor(guild_id)
-    nome_formatado = nome.strip()
-    if nome_formatado in elenco_geral[guild_id]:
-        return await interaction.response.send_message("❌ Jogador já cadastrado!", ephemeral=True)
-    elenco_geral[guild_id].append(nome_formatado)
-    elenco_geral[guild_id].sort()
-    await salvar_dados_async(ELENCO_FILE, elenco_geral)
-    await interaction.response.send_message(f"✅ Jogador **{nome_formatado}** adicionado!", ephemeral=True)
-
-@bot.tree.command(name="removerjogador", description="[Admin] Remove um jogador do elenco.")
-@app_commands.autocomplete(nome=autocomplete_jogadores)
-async def removerjogador_cmd(interaction: discord.Interaction, nome: str):
-    if not verificar_permissao_adm(interaction):
-        return await interaction.response.send_message("❌ Sem permissão.", ephemeral=True)
-    guild_id = str(interaction.guild_id)
-    elenco_geral = await carregar_dados_async(ELENCO_FILE)
-    if guild_id not in elenco_geral:
-        elenco_geral[guild_id] = obter_elenco_servidor(guild_id)
-    if nome not in elenco_geral[guild_id]:
-        return await interaction.response.send_message("❌ Jogador não encontrado.", ephemeral=True)
-    elenco_geral[guild_id].remove(nome)
-    await salvar_dados_async(ELENCO_FILE, elenco_geral)
-    await interaction.response.send_message(f"🗑️ Jogador **{nome}** removido!", ephemeral=True)
 
 @bot.tree.command(name="setarjogo", description="[Admin] Define o próximo jogo.")
 async def setarjogo_cmd(interaction: discord.Interaction, mandante: str, visitante: str, horario: str, estadio: str):
@@ -376,7 +316,7 @@ async def setarjogo_cmd(interaction: discord.Interaction, mandante: str, visitan
             texto_marcacao = f"<@&{cargo_marcacao_id}>" if cargo_marcacao_id else ""
             embed = discord.Embed(
                 title="🚨 Novo Jogo Cadastrado no Bolão!",
-                description=f"Partida: **{mandante} x {visitante}**\n🕒 Horário: `{horario}`\n🏟️ Estádio: `{estadio}`\n\nO bolão está aberto! Vá até {canal_cmd_mencao} e use `/palpite` para registrar sua aposta.",
+                description=f"Partida: **{mandante} x {visitante}**\n🕒 Horário: `{horario}`\n🏟️ Estádio: `{estadio}`\n\nO bolão está aberto! Vá até {canal_cmd_mencao} e use `/palpite` para registrar ou editar sua aposta.",
                 color=0x0033A0
             )
             await canal_avisos.send(content=texto_marcacao, embed=embed)
@@ -426,7 +366,7 @@ async def fecharpalpite_cmd(interaction: discord.Interaction):
             )
             await canal_avisos.send(embed=embed)
 
-@bot.tree.command(name="palpite", description="Abre o painel para registrar palpite.")
+@bot.tree.command(name="palpite", description="Abre o painel para registrar ou editar seu palpite.")
 async def palpite_cmd(interaction: discord.Interaction):
     guild_id = str(interaction.guild_id)
     config_geral = await carregar_dados_async(CONFIG_FILE)
@@ -443,7 +383,81 @@ async def palpite_cmd(interaction: discord.Interaction):
     if not jogo.get("aberto", True):
         return await interaction.response.send_message("❌ Os palpites para esta partida já foram encerrados!", ephemeral=True)
 
-    await interaction.response.send_modal(PalpiteModal(jogo))
+    palpites_geral = await carregar_dados_async(PALPITES_FILE)
+    palpite_existente = palpites_geral.get(guild_id, {}).get(str(interaction.user.id))
+
+    await interaction.response.send_modal(PalpiteModal(jogo, palpite_existente))
+
+@bot.tree.command(name="cancelarpalpite", description="Cancela e remove o seu palpite para o jogo ativo.")
+async def cancelarpalpite_cmd(interaction: discord.Interaction):
+    guild_id = str(interaction.guild_id)
+    user_id = str(interaction.user.id)
+
+    jogos_geral = await carregar_dados_async(JOGO_ATIVO_FILE)
+    jogo = jogos_geral.get(guild_id)
+    if not jogo or not jogo.get("aberto", True):
+        return await interaction.response.send_message("❌ Não há jogo ativo com palpites abertos para cancelar.", ephemeral=True)
+
+    palpites_geral = await carregar_dados_async(PALPITES_FILE)
+    if guild_id not in palpites_geral or user_id not in palpites_geral[guild_id]:
+        return await interaction.response.send_message("❌ Você não possui nenhum palpite registrado para este jogo.", ephemeral=True)
+
+    del palpites_geral[guild_id][user_id]
+    await salvar_dados_async(PALPITES_FILE, palpites_geral)
+
+    await interaction.response.send_message("🗑️ Seu palpite para esta partida foi cancelado e removido com sucesso!", ephemeral=True)
+
+@bot.tree.command(name="meuspalpites", description="Exibe seu retrospecto, taxa de acerto e histórico de palpites.")
+async def meuspalpites_cmd(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+
+    guild_id = str(interaction.guild_id)
+    user_id = str(interaction.user.id)
+
+    historico_geral = await carregar_dados_async(HISTORICO_FILE)
+    historico_servidor = historico_geral.get(guild_id, [])
+
+    palpites_usuario = []
+    total_pontos = 0
+    jogos_participados = 0
+    placar_exato_cnt = 0
+    vencedor_cnt = 0
+
+    for partida in reversed(historico_servidor):
+        if user_id in partida.get("palpites", {}):
+            p = partida["palpites"][user_id]
+            jogos_participados += 1
+            pts = p.get("pontos_ganhos", 0)
+            total_pontos += pts
+
+            if "🎯 Placar Exato (+3 pts)" in p.get("detalhes", []):
+                placar_exato_cnt += 1
+            elif "✅ Vencedor (+1 pt)" in p.get("detalhes", []):
+                vencedor_cnt += 1
+
+            if len(palpites_usuario) < 5:
+                palpites_usuario.append(
+                    f"• **{partida['partida']}** (`{partida['placar_real']}`)\n"
+                    f"  Palpite: `{p['g_mand']}x{p['g_vis']}` | **+{pts} pts**"
+                )
+
+    if jogos_participados == 0:
+        return await interaction.followup.send("❌ Você ainda não possui nenhum palpite finalizado no histórico deste servidor.", ephemeral=True)
+
+    taxa_vencedor = (vencedor_cnt / jogos_participados) * 100
+    taxa_placar = (placar_exato_cnt / jogos_participados) * 100
+
+    embed = discord.Embed(
+        title=f"📊 Retrospecto de {interaction.user.display_name}",
+        color=0x0033A0
+    )
+    embed.add_field(name="📈 Estatísticas Gerais", value=f"• Jogos Participados: **{jogos_participados}**\n• Pontuação Total: **{total_pontos} pts**\n• Média de Pts/Jogo: **{total_pontos/jogos_participados:.1f}**", inline=False)
+    embed.add_field(name="🎯 Taxas de Acerto", value=f"• Placar Exato: **{taxa_placar:.1f}%** ({placar_exato_cnt})\n• Vencedor/Empate: **{taxa_vencedor:.1f}%** ({vencedor_cnt})", inline=False)
+    
+    texto_historico = "\n".join(palpites_usuario) if palpites_usuario else "Nenhum histórico disponível."
+    embed.add_field(name="📜 Últimos Palpites", value=texto_historico, inline=False)
+
+    await interaction.followup.send(embed=embed, ephemeral=True)
 
 @bot.tree.command(name="registro", description="Exibe dados da partida atual, do histórico geral e participação por membro.")
 async def registro_cmd(interaction: discord.Interaction):
@@ -453,47 +467,29 @@ async def registro_cmd(interaction: discord.Interaction):
 
     jogos_geral = await carregar_dados_async(JOGO_ATIVO_FILE)
     palpites_geral = await carregar_dados_async(PALPITES_FILE)
-    ranking_geral = await carregar_dados_async(RANKING_FILE)
 
-    # 1. Palpites da partida atual do servidor
     jogo_atual = jogos_geral.get(guild_id)
     palpites_jogo_atual = palpites_geral.get(guild_id, {}) if jogo_atual else {}
     qtd_palpites_atual = len(palpites_jogo_atual)
 
-    # 2. Histórico geral de partidas e contagem por usuário
-    total_palpites_servidor = 0
-    total_partidas_registradas = 0
+    historico_geral = await carregar_dados_async(HISTORICO_FILE)
+    historico_servidor = historico_geral.get(guild_id, [])
+
+    total_partidas_registradas = len(historico_servidor)
     contagem_usuarios = {}
 
-    if guild_id in palpites_geral:
-        dados_servidor = palpites_geral[guild_id]
-        
-        if any(isinstance(v, dict) and "palpites" in v for v in dados_servidor.values()):
-            for id_partida, partida_dados in dados_servidor.items():
-                if isinstance(partida_dados, dict) and "palpites" in partida_dados:
-                    total_partidas_registradas += 1
-                    for uid in partida_dados["palpites"].keys():
-                        total_palpites_servidor += 1
-                        u_str = str(uid)
-                        contagem_usuarios[u_str] = contagem_usuarios.get(u_str, 0) + 1
-        else:
-            if dados_servidor:
-                total_partidas_registradas = 1 if jogo_atual else 0
-                for uid in dados_servidor.keys():
-                    total_palpites_servidor += 1
-                    u_str = str(uid)
-                    contagem_usuarios[u_str] = contagem_usuarios.get(u_str, 0) + 1
+    for partida in historico_servidor:
+        for uid in partida.get("palpites", {}).keys():
+            contagem_usuarios[uid] = contagem_usuarios.get(uid, 0) + 1
 
-    # 3. Formatação do Top 10
     usuarios_ordenados = sorted(contagem_usuarios.items(), key=lambda x: x[1], reverse=True)[:10]
     
     linhas_usuarios = [
         f"`#{i+1:02d}` <@{u_id}> — **{qtd}** palpite(s)" 
         for i, (u_id, qtd) in enumerate(usuarios_ordenados)
     ]
-    texto_usuarios = "\n".join(linhas_usuarios) if linhas_usuarios else "Nenhum palpite registrado ainda."
+    texto_usuarios = "\n".join(linhas_usuarios) if linhas_usuarios else "Nenhum palpite registrado no histórico."
 
-    # 4. Construção do Embed
     embed = discord.Embed(
         title="📊 Registros e Estatísticas do Bolão",
         color=0x0033A0
@@ -502,7 +498,7 @@ async def registro_cmd(interaction: discord.Interaction):
     info_jogo = f"Partida: **{jogo_atual['mandante']} x {jogo_atual['visitante']}**\nPalpites registrados: **{qtd_palpites_atual}**" if jogo_atual else "Nenhum jogo ativo no momento."
     
     embed.add_field(name="⚽ Partida Atual", value=info_jogo, inline=False)
-    embed.add_field(name="📈 Histórico do Servidor", value=f"• Total de Partidas: **{total_partidas_registradas}**\n• Total de Palpites Enviados: **{total_palpites_servidor}**", inline=False)
+    embed.add_field(name="📈 Histórico do Servidor", value=f"• Total de Partidas Finalizadas: **{total_partidas_registradas}**", inline=False)
     embed.add_field(name="🏆 Frequência de Palpites (Top 10)", value=texto_usuarios, inline=False)
     embed.set_footer(text=f"Total de participantes únicos: {len(contagem_usuarios)}")
 
@@ -535,6 +531,12 @@ async def placarfinal_cmd(interaction: discord.Interaction, gols_mandante: int, 
     lista_marcadores_reais = [m.strip().lower() for m in marcadores_reais.split(',') if m.strip()]
     lista_assistentes_reais = [a.strip().lower() for a in assistentes_reais.split(',') if a.strip()]
 
+    registro_partida = {
+        "partida": f"{jogo['mandante']} x {jogo['visitante']}",
+        "placar_real": f"{gols_mandante}x{gols_visitante}",
+        "palpites": {}
+    }
+
     for uid, dados in palpites.items():
         g_m, g_v, nome = dados["g_mand"], dados["g_vis"], dados["nome"]
         marc_palpite = dados["marcador"]
@@ -565,8 +567,6 @@ async def placarfinal_cmd(interaction: discord.Interaction, gols_mandante: int, 
         if acertou_marcador:
             pontos += 2
             acertos_detalhes.append("⚽ Acertou Marcador (+2 pts)")
-        else:
-            acertos_detalhes.append("❌ Errou Marcador")
 
         acertou_assistente = False
         if asst_palpite.lower() != "nenhum":
@@ -579,8 +579,6 @@ async def placarfinal_cmd(interaction: discord.Interaction, gols_mandante: int, 
         if acertou_assistente:
             pontos += 1
             acertos_detalhes.append("👟 Acertou Assistente (+1 pt)")
-        else:
-            acertos_detalhes.append("❌ Errou Assistente")
 
         if uid not in ranking:
             ranking[uid] = {"nome": nome, "pontos": 0}
@@ -588,6 +586,20 @@ async def placarfinal_cmd(interaction: discord.Interaction, gols_mandante: int, 
         
         detalhes_str = " | ".join(acertos_detalhes)
         apuracao_texto += f"- <@{uid}> (`{g_m}x{g_v}`): **+{pontos} pts** ({detalhes_str})\n"
+
+        registro_partida["palpites"][uid] = {
+            "g_mand": g_m,
+            "g_vis": g_v,
+            "pontos_ganhos": pontos,
+            "detalhes": acertos_detalhes
+        }
+
+    # Salva no histórico para o /meuspalpites
+    historico_geral = await carregar_dados_async(HISTORICO_FILE)
+    if guild_id not in historico_geral:
+        historico_geral[guild_id] = []
+    historico_geral[guild_id].append(registro_partida)
+    await salvar_dados_async(HISTORICO_FILE, historico_geral)
 
     await salvar_dados_async(RANKING_FILE, ranking_geral)
     

@@ -13,7 +13,7 @@ RANKING_FILE = "ranking.json"
 JOGO_ATIVO_FILE = "jogo_ativo.json"
 ELENCO_FILE = "elenco.json"
 
-# Lock para evitar corrupção de arquivos JSON durante acessos assíncronos
+# Lock assíncrono para garantir a integridade dos arquivos JSON
 file_lock = asyncio.Lock()
 
 intents = discord.Intents.default()
@@ -22,7 +22,7 @@ intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# --- FUNÇÕES DE PERSISTÊNCIA SÍNCRONAS E ASSÍNCRONAS ---
+# --- FUNÇÕES DE PERSISTÊNCIA (COM SUPORTE ASYNC) ---
 
 def carregar_dados(arquivo):
     if os.path.exists(arquivo):
@@ -80,11 +80,18 @@ async def autocomplete_jogadores(interaction: discord.Interaction, current: str)
         for jogador in jogadores if current.lower() in jogador.lower()
     ][:25]
 
-# --- PAINEL E MENUS DE CONFIGURAÇÃO ---
+# --- PAINEL E MENUS DE CONFIGURAÇÃO (CORRIGIDOS COM CUSTOM_ID) ---
 
 class SetupSelectCanalRanking(ui.ChannelSelect):
     def __init__(self):
-        super().__init__(placeholder="Selecione o canal do Ranking", channel_types=[discord.ChannelType.text], min_values=1, max_values=1, row=0)
+        super().__init__(
+            custom_id="setup_select_canal_ranking",
+            placeholder="Selecione o canal do Ranking", 
+            channel_types=[discord.ChannelType.text], 
+            min_values=1, 
+            max_values=1, 
+            row=0
+        )
 
     async def callback(self, interaction: discord.Interaction):
         guild_id = str(interaction.guild_id)
@@ -96,7 +103,14 @@ class SetupSelectCanalRanking(ui.ChannelSelect):
 
 class SetupSelectCanalComandos(ui.ChannelSelect):
     def __init__(self):
-        super().__init__(placeholder="Selecione o canal para /palpite", channel_types=[discord.ChannelType.text], min_values=1, max_values=1, row=1)
+        super().__init__(
+            custom_id="setup_select_canal_comandos",
+            placeholder="Selecione o canal para /palpite", 
+            channel_types=[discord.ChannelType.text], 
+            min_values=1, 
+            max_values=1, 
+            row=1
+        )
 
     async def callback(self, interaction: discord.Interaction):
         guild_id = str(interaction.guild_id)
@@ -108,7 +122,14 @@ class SetupSelectCanalComandos(ui.ChannelSelect):
 
 class SetupSelectCanalAvisos(ui.ChannelSelect):
     def __init__(self):
-        super().__init__(placeholder="Selecione o canal de Avisos de Jogos", channel_types=[discord.ChannelType.text], min_values=1, max_values=1, row=2)
+        super().__init__(
+            custom_id="setup_select_canal_avisos",
+            placeholder="Selecione o canal de Avisos de Jogos", 
+            channel_types=[discord.ChannelType.text], 
+            min_values=1, 
+            max_values=1, 
+            row=2
+        )
 
     async def callback(self, interaction: discord.Interaction):
         guild_id = str(interaction.guild_id)
@@ -120,7 +141,13 @@ class SetupSelectCanalAvisos(ui.ChannelSelect):
 
 class SetupSelectCargoMarcacao(ui.RoleSelect):
     def __init__(self):
-        super().__init__(placeholder="Selecione o Cargo para marcar nos avisos", min_values=1, max_values=1, row=3)
+        super().__init__(
+            custom_id="setup_select_cargo_marcacao",
+            placeholder="Selecione o Cargo para marcar nos avisos", 
+            min_values=1, 
+            max_values=1, 
+            row=3
+        )
 
     async def callback(self, interaction: discord.Interaction):
         guild_id = str(interaction.guild_id)
@@ -132,7 +159,13 @@ class SetupSelectCargoMarcacao(ui.RoleSelect):
 
 class SetupSelectCargoAdm(ui.RoleSelect):
     def __init__(self):
-        super().__init__(placeholder="Selecione o Cargo de ADM do Bot", min_values=1, max_values=1, row=4)
+        super().__init__(
+            custom_id="setup_select_cargo_adm",
+            placeholder="Selecione o Cargo de ADM do Bot", 
+            min_values=1, 
+            max_values=1, 
+            row=4
+        )
 
     async def callback(self, interaction: discord.Interaction):
         guild_id = str(interaction.guild_id)
@@ -409,15 +442,12 @@ async def palpite_cmd(interaction: discord.Interaction):
 
     await interaction.response.send_modal(PalpiteModal(jogo))
 
-# --- COMANDO /registro ATUALIZADO E OTIMIZADO ---
-
 @bot.tree.command(name="registro", description="Exibe dados da partida atual, do histórico geral e participação por membro.")
 async def registro_cmd(interaction: discord.Interaction):
     await interaction.response.defer()
 
     guild_id = str(interaction.guild_id)
 
-    # Carregamento seguro dos arquivos
     jogos_geral = await carregar_dados_async(JOGO_ATIVO_FILE)
     palpites_geral = await carregar_dados_async(PALPITES_FILE)
     ranking_geral = await carregar_dados_async(RANKING_FILE)
@@ -427,19 +457,14 @@ async def registro_cmd(interaction: discord.Interaction):
     palpites_jogo_atual = palpites_geral.get(guild_id, {}) if jogo_atual else {}
     qtd_palpites_atual = len(palpites_jogo_atual)
 
-    # 2. Histórico geral de partidas e contagem de palpites por usuário do servidor
+    # 2. Histórico geral de partidas e contagem por usuário
     total_palpites_servidor = 0
     total_partidas_registradas = 0
     contagem_usuarios = {}
 
-    # Varre o histórico do servidor no ranking (membros cadastrados)
-    ranking_servidor = ranking_geral.get(guild_id, {})
-
-    # Se houver palpites computados/arquivados no histórico do servidor
     if guild_id in palpites_geral:
         dados_servidor = palpites_geral[guild_id]
         
-        # Caso a estrutura armazene por ID de partidas encerradas
         if any(isinstance(v, dict) and "palpites" in v for v in dados_servidor.values()):
             for id_partida, partida_dados in dados_servidor.items():
                 if isinstance(partida_dados, dict) and "palpites" in partida_dados:
@@ -449,7 +474,6 @@ async def registro_cmd(interaction: discord.Interaction):
                         u_str = str(uid)
                         contagem_usuarios[u_str] = contagem_usuarios.get(u_str, 0) + 1
         else:
-            # Caso seja a estrutura simples (1 partida ativa armazenada direto em palpites_geral)
             if dados_servidor:
                 total_partidas_registradas = 1 if jogo_atual else 0
                 for uid in dados_servidor.keys():
@@ -457,12 +481,7 @@ async def registro_cmd(interaction: discord.Interaction):
                     u_str = str(uid)
                     contagem_usuarios[u_str] = contagem_usuarios.get(u_str, 0) + 1
 
-    # Inclui os palpites do jogo ativo atual na contagem geral caso ainda não contados
-    if jogo_atual and palpites_jogo_atual:
-        for uid in palpites_jogo_atual.keys():
-            u_str = str(uid)
-
-    # 3. Formatação do Ranking de Participação (Top 10)
+    # 3. Formatação do Top 10
     usuarios_ordenados = sorted(contagem_usuarios.items(), key=lambda x: x[1], reverse=True)[:10]
     
     linhas_usuarios = [
@@ -471,7 +490,7 @@ async def registro_cmd(interaction: discord.Interaction):
     ]
     texto_usuarios = "\n".join(linhas_usuarios) if linhas_usuarios else "Nenhum palpite registrado ainda."
 
-    # 4. Construção e Envio do Embed
+    # 4. Construção do Embed
     embed = discord.Embed(
         title="📊 Registros e Estatísticas do Bolão",
         color=0x0033A0
@@ -482,7 +501,7 @@ async def registro_cmd(interaction: discord.Interaction):
     embed.add_field(name="⚽ Partida Atual", value=info_jogo, inline=False)
     embed.add_field(name="📈 Histórico do Servidor", value=f"• Total de Partidas: **{total_partidas_registradas}**\n• Total de Palpites Enviados: **{total_palpites_servidor}**", inline=False)
     embed.add_field(name="🏆 Frequência de Palpites (Top 10)", value=texto_usuarios, inline=False)
-    embed.set_footer(text=f"Total de palpitadores no servidor: {len(contagem_usuarios)}")
+    embed.set_footer(text=f"Total de participantes únicos: {len(contagem_usuarios)}")
 
     await interaction.followup.send(embed=embed)
 

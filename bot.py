@@ -193,6 +193,8 @@ class PalpiteModal(ui.Modal):
         user_name = interaction.user.display_name
         
         palpites_geral = await carregar_dados_async(PALPITES_FILE)
+        
+        # Garante que a chave exista como String
         if guild_id not in palpites_geral:
             palpites_geral[guild_id] = {}
         
@@ -211,7 +213,7 @@ class PalpiteModal(ui.Modal):
 
         embed = discord.Embed(
             title=status_msg, 
-            description=f"Partida: **{self.jogo['mandante']} {g_mand} x {g_vis} {self.jogo['visitante']}**\n⚽ **Marcador(es):** {marc}\nMD **Assistente(s):** {asst}", 
+            description=f"Partida: **{self.jogo['mandante']} {g_mand} x {g_vis} {self.jogo['visitante']}**\n⚽ **Marcador(es):** {marc}\n👟 **Assistente(s):** {asst}", 
             color=0x0033A0
         )
         await interaction.response.send_message(embed=embed, ephemeral=True)
@@ -388,7 +390,6 @@ async def meuspalpites_cmd(interaction: discord.Interaction):
     placar_exato_cnt = 0
     vencedor_cnt = 0
 
-    # Lê o histórico de jogos finalizados
     for partida in reversed(historico_servidor):
         if user_id in partida.get("palpites", {}):
             p = partida["palpites"][user_id]
@@ -407,17 +408,15 @@ async def meuspalpites_cmd(interaction: discord.Interaction):
                     f"  Palpite: `{p['g_mand']}x{p['g_vis']}` | **+{pts} pts**"
                 )
 
-    # Se ainda não houver partidas no historico_palpites.json, lê do ranking antigo acumulado
     ranking_geral = await carregar_dados_async(RANKING_FILE)
     ranking_servidor = ranking_geral.get(guild_id, {})
     
     if jogos_participados == 0 and user_id in ranking_servidor:
         pts = ranking_servidor[user_id].get("pontos", 0)
         total_pontos = pts
-        jogos_participados = 1  # Pontuação de jogos passados acumulados
+        jogos_participados = 1  
         palpites_usuario.append(f"• **Saldo de Pontos Anteriores**: **{pts} pts**")
 
-    # Verifica se há um palpite ativo para o jogo atual que ainda não encerrou
     palpites_geral = await carregar_dados_async(PALPITES_FILE)
     palpite_atual = palpites_geral.get(guild_id, {}).get(user_id)
     info_atual = ""
@@ -457,9 +456,12 @@ async def registro_cmd(interaction: discord.Interaction):
     palpites_geral = await carregar_dados_async(PALPITES_FILE)
 
     jogo_atual = jogos_geral.get(guild_id)
-    palpites_jogo_atual = palpites_geral.get(guild_id, {})
     
-    # Contagem em tempo real de quem palpitou para o jogo atual
+    # Busca permissiva garantindo a string do guild_id
+    palpites_jogo_atual = palpites_geral.get(guild_id, {})
+    if not palpites_jogo_atual and int(guild_id) in palpites_geral:
+        palpites_jogo_atual = palpites_geral.get(int(guild_id), {})
+
     qtd_palpites_atual = len(palpites_jogo_atual)
 
     historico_geral = await carregar_dados_async(HISTORICO_FILE)
@@ -470,7 +472,6 @@ async def registro_cmd(interaction: discord.Interaction):
     total_partidas_registradas = len(historico_servidor)
     contagem_usuarios = {}
 
-    # Soma histórico + ranking existente
     for partida in historico_servidor:
         for uid in partida.get("palpites", {}).keys():
             contagem_usuarios[uid] = contagem_usuarios.get(uid, 0) + 1
@@ -516,7 +517,9 @@ async def placarfinal_cmd(interaction: discord.Interaction, gols_mandante: int, 
     
     palpites_geral = await carregar_dados_async(PALPITES_FILE)
     palpites = palpites_geral.get(guild_id, {})
-    
+    if not palpites and int(guild_id) in palpites_geral:
+        palpites = palpites_geral.get(int(guild_id), {})
+
     ranking_geral = await carregar_dados_async(RANKING_FILE)
     if guild_id not in ranking_geral:
         ranking_geral[guild_id] = {}
@@ -591,7 +594,6 @@ async def placarfinal_cmd(interaction: discord.Interaction, gols_mandante: int, 
             "detalhes": acertos_detalhes
         }
 
-    # Salva no histórico para o /meuspalpites
     historico_geral = await carregar_dados_async(HISTORICO_FILE)
     if guild_id not in historico_geral:
         historico_geral[guild_id] = []
@@ -604,20 +606,6 @@ async def placarfinal_cmd(interaction: discord.Interaction, gols_mandante: int, 
     
     config_geral = await carregar_dados_async(CONFIG_FILE)
     config = config_geral.get(guild_id, {})
-    cargo_top1_id = config.get("cargo_top1")
-    if cargo_top1_id and ranking_ordenado:
-        top1_uid = int(ranking_ordenado[0][0])
-        cargo_top1 = interaction.guild.get_role(int(cargo_top1_id))
-        if cargo_top1:
-            try:
-                for member in cargo_top1.members:
-                    if member.id != top1_uid:
-                        await member.remove_roles(cargo_top1)
-                top_member = interaction.guild.get_member(top1_uid)
-                if top_member and cargo_top1 not in top_member.roles:
-                    await top_member.add_roles(cargo_top1)
-            except Exception as err:
-                print(f"⚠️ Erro ao atribuir cargo do Top 1: {err}")
 
     texto_ranking = "".join([f"**{i}º** {inf['nome']} (`{inf['pontos']} pts`)\n" for i, (u, inf) in enumerate(ranking_ordenado, 1)])
     
@@ -638,10 +626,11 @@ async def placarfinal_cmd(interaction: discord.Interaction, gols_mandante: int, 
     else:
         await interaction.followup.send(embed=embed)
 
-    # Limpa palpites da rodada atual
     if guild_id in palpites_geral:
         palpites_geral[guild_id] = {}
-        await salvar_dados_async(PALPITES_FILE, palpites_geral)
+    if str(interaction.guild_id) in palpites_geral:
+        palpites_geral[str(interaction.guild_id)] = {}
+    await salvar_dados_async(PALPITES_FILE, palpites_geral)
 
     if guild_id in jogos_geral:
         del jogos_geral[guild_id]

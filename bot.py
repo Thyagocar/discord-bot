@@ -194,7 +194,6 @@ class PalpiteModal(ui.Modal):
         
         palpites_geral = await carregar_dados_async(PALPITES_FILE)
         
-        # Garante que a chave exista como String
         if guild_id not in palpites_geral:
             palpites_geral[guild_id] = {}
         
@@ -270,14 +269,20 @@ async def setarjogo_cmd(interaction: discord.Interaction, mandante: str, visitan
         return await interaction.response.send_message("❌ Sem permissão.", ephemeral=True)
     
     guild_id = str(interaction.guild_id)
+    
+    # Salva Novo Jogo Ativo
     jogos_geral = await carregar_dados_async(JOGO_ATIVO_FILE)
     jogos_geral[guild_id] = {
         "mandante": mandante, "visitante": visitante, "horario": horario, "estadio": estadio, "aberto": True, "guild_id": guild_id
     }
     await salvar_dados_async(JOGO_ATIVO_FILE, jogos_geral)
     
+    # Zera Completamente os Palpites Anteriores do Servidor
     palpites_geral = await carregar_dados_async(PALPITES_FILE)
     palpites_geral[guild_id] = {}
+    if interaction.guild_id in palpites_geral:
+        del palpites_geral[interaction.guild_id]
+        
     await salvar_dados_async(PALPITES_FILE, palpites_geral)
 
     config_geral = await carregar_dados_async(CONFIG_FILE)
@@ -457,7 +462,7 @@ async def registro_cmd(interaction: discord.Interaction):
 
     jogo_atual = jogos_geral.get(guild_id)
     
-    # Busca permissiva garantindo a string do guild_id
+    # Leitura com conversão garantida de guild_id
     palpites_jogo_atual = palpites_geral.get(guild_id, {})
     if not palpites_jogo_atual and int(guild_id) in palpites_geral:
         palpites_jogo_atual = palpites_geral.get(int(guild_id), {})
@@ -626,12 +631,13 @@ async def placarfinal_cmd(interaction: discord.Interaction, gols_mandante: int, 
     else:
         await interaction.followup.send(embed=embed)
 
-    if guild_id in palpites_geral:
-        palpites_geral[guild_id] = {}
+    # Limpa palpites ativos
+    palpites_geral[guild_id] = {}
     if str(interaction.guild_id) in palpites_geral:
         palpites_geral[str(interaction.guild_id)] = {}
     await salvar_dados_async(PALPITES_FILE, palpites_geral)
 
+    # Limpa jogo ativo
     if guild_id in jogos_geral:
         del jogos_geral[guild_id]
         await salvar_dados_async(JOGO_ATIVO_FILE, jogos_geral)

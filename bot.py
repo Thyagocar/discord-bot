@@ -6,7 +6,12 @@ from typing import Dict, Any, Optional
 import discord
 from discord import app_commands, ui
 from discord.ext import commands
+from dotenv import load_dotenv
 
+# Carrega o arquivo .env se estiver rodando localmente
+load_dotenv()
+
+# Obtém o token das variáveis de ambiente da plataforma (Discloud/Heroku/etc) ou do .env
 TOKEN_DO_BOT = os.getenv("DISCORD_TOKEN")
 
 CONFIG_FILE = "config.json"
@@ -266,7 +271,6 @@ async def setarjogo_cmd(interaction: discord.Interaction, mandante: str, visitan
     }
     await atualizar_dados(JOGO_ATIVO_FILE, jogos_geral)
     
-    # Reseta apenas os palpites ativos do servidor atual
     palpites_geral = await obter_dados(PALPITES_FILE)
     palpites_geral[guild_id] = {}
     await atualizar_dados(PALPITES_FILE, palpites_geral)
@@ -482,7 +486,6 @@ async def placarfinal_cmd(interaction: discord.Interaction, gols_mandante: int, 
     
     vencedor_real = "mandante" if gols_mandante > gols_visitante else ("visitante" if gols_visitante > gols_mandante else "empate")
     
-    # Processa strings normalizadas
     lista_marcadores_reais = [normalizar_texto(m) for m in marcadores_reais.split(',') if m.strip()]
     lista_assistentes_reais = [normalizar_texto(a) for a in assistentes_reais.split(',') if a.strip()]
 
@@ -503,7 +506,6 @@ async def placarfinal_cmd(interaction: discord.Interaction, gols_mandante: int, 
         pontos = 0
         acertos_detalhes = []
         
-        # Regras de Pontuação do Placar
         if g_m == gols_mandante and g_v == gols_visitante:
             pontos += 3
             acertos_detalhes.append("🎯 Placar Exato (+3 pts)")
@@ -513,14 +515,12 @@ async def placarfinal_cmd(interaction: discord.Interaction, gols_mandante: int, 
         else:
             acertos_detalhes.append("❌ Errou Placar")
 
-        # Regras para Marcadores
         if marc_palpite and marc_palpite != "nenhum":
             marcadores_usuario = [m.strip() for m in marc_palpite.split(',') if m.strip()]
             if any(mr in mu for mr in lista_marcadores_reais for mu in marcadores_usuario if mu):
                 pontos += 2
                 acertos_detalhes.append("⚽ Marcador (+2 pts)")
 
-        # Regras para Assistentes
         if asst_palpite and asst_palpite != "nenhum":
             assistentes_usuario = [a.strip() for a in asst_palpite.split(',') if a.strip()]
             if any(ar in au for ar in lista_assistentes_reais for au in assistentes_usuario if au):
@@ -530,7 +530,7 @@ async def placarfinal_cmd(interaction: discord.Interaction, gols_mandante: int, 
         if uid not in ranking:
             ranking[uid] = {"nome": nome, "pontos": 0}
         ranking[uid]["pontos"] += pontos
-        ranking[uid]["nome"] = nome # Atualiza nome caso tenha mudado
+        ranking[uid]["nome"] = nome
         
         detalhes_str = " | ".join(acertos_detalhes)
         apuracao_linhas.append(f"• <@{uid}> (`{g_m}x{g_v}`): **+{pontos} pts** ({detalhes_str})")
@@ -539,7 +539,6 @@ async def placarfinal_cmd(interaction: discord.Interaction, gols_mandante: int, 
             "g_mand": g_m, "g_vis": g_v, "pontos_ganhos": pontos, "detalhes": acertos_detalhes
         }
 
-    # Salva Histórico
     historico_geral = await obter_dados(HISTORICO_FILE)
     if guild_id not in historico_geral:
         historico_geral[guild_id] = []
@@ -548,7 +547,6 @@ async def placarfinal_cmd(interaction: discord.Interaction, gols_mandante: int, 
     await atualizar_dados(HISTORICO_FILE, historico_geral)
     await atualizar_dados(RANKING_FILE, ranking_geral)
     
-    # Limpa estados ativos
     palpites_geral[guild_id] = {}
     await atualizar_dados(PALPITES_FILE, palpites_geral)
     
@@ -556,7 +554,6 @@ async def placarfinal_cmd(interaction: discord.Interaction, gols_mandante: int, 
         del jogos_geral[guild_id]
         await atualizar_dados(JOGO_ATIVO_FILE, jogos_geral)
 
-    # Monta e Envia o Resultado
     ranking_ordenado = sorted(ranking.items(), key=lambda x: x[1]["pontos"], reverse=True)
     texto_ranking = "".join([f"**{i}º** {inf['nome']} — `{inf['pontos']} pts`\n" for i, (u, inf) in enumerate(ranking_ordenado[:15], 1)])
     texto_apuracao = "\n".join(apuracao_linhas) if apuracao_linhas else "Nenhum palpite foi feito nesta partida."

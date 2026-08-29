@@ -1,0 +1,5 @@
+.env
+discloud.config
+__pycache__/
+*.json
+*.tmp
